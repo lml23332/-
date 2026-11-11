@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>校门口小卖部</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/window.css">
+</head>
+<body>
+  <dialog id="title-screen" aria-labelledby="game-title">
+    <div class="title-card">
+      <h1 id="game-title">校门口小卖部</h1>
+      <button id="start-game" class="btn gold" autofocus>开始营业</button>
+      <button id="guide-start" class="btn">新手引导</button>
+      <button id="btn-reset" class="btn danger-ghost hidden">重新开店</button>
+    </div>
+  </dialog>
+  <div id="shop-notice" class="shop-notice" role="alert"></div>
+
+  <dialog id="event-dialog" aria-labelledby="event-heading" aria-describedby="event-message">
+    <h2 id="event-heading">柜台消息</h2>
+    <p id="event-message"></p>
+    <form method="dialog"><button class="btn gold" autofocus>知道了</button></form>
+  </dialog>
+
+  <!-- 顶部资源栏：天数 / 资金 / 口碑 / 目标进度 -->
+  <header id="topbar">
+    <div class="brand">校门口小卖部</div>
+    <div class="stats">
+      <span class="stat" id="stat-day">第 1 天</span>
+      <span class="stat money" id="stat-money">💰 ¥250</span>
+      <span class="stat" id="stat-rep">😊 口碑 0</span>
+      <span class="stat goal" id="stat-goal">🎯 盘下店面 ¥250 / ¥3000</span>
+    </div>
+    <div class="top-actions">
+      <button id="btn-endday" class="btn primary">🌙 收摊结算</button>
+      <button id="music-toggle" class="btn" aria-label="背景音乐" aria-pressed="false">音乐</button><label class="volume-control">音量 <input id="music-volume" type="range" min="0" max="100" value="70"></label><button id="open-title" class="btn">主菜单</button>
+    </div>
+  </header>
+
+  <div id="win-banner" class="win-banner hidden">
+    🎉 你攒够了 ¥3000，正式盘下了这间小卖部！可以继续经营，当个长久掌柜。
+    <button id="btn-win-close" class="btn small">继续经营</button>
+  </div>
+
+  <section id="guide" class="hidden" aria-label="新手引导">
+    <p id="guide-text" role="status"></p>
+    <button id="hide-guide" class="btn small">退出引导</button>
+  </section>
+  <main>
+    <section class="shop" aria-label="小卖部售货窗口">
+      <div class="street">
+        <div class="walkers" aria-hidden="true">
+          <span class="walker"><i class="person"></i></span>
+          <span class="walker walker-second"><i class="person"></i></span>
+        </div>
+        <button type="button" id="guest-call" class="guest-call hidden" aria-controls="counter trade-dialogue" aria-expanded="false">
+          <span id="portrait-frame" class="portrait-frame" aria-hidden="true"></span>
+          <span id="guest-label"></span>
+        </button>
+        <div id="trade-dialogue" class="trade-dialogue hidden" aria-live="polite"></div>
+        <button id="shop-npc" type="button" class="btn small shop-npc"></button>
+        <p id="street-status" class="street-status" role="status"></p>
+      </div>
+      <section class="display" aria-label="窗台陈列">
+        <button id="open-shelf" type="button" class="counter-shelf" aria-label="查看货架">
+          <span id="counter-stock" aria-hidden="true"></span>
+        </button>
+        <button id="open-log" type="button" class="counter-book" aria-haspopup="dialog">流水账</button>
+        <button id="open-wholesale" type="button" class="btn small gold">进货</button>
+      </section>
+      <section id="counter" class="trade-stage hidden" aria-label="柜台交易">
+        <section id="visitor-area" aria-label="交易信息"></section>
+        <p id="trade-guide" class="hidden"></p>
+        <section id="action-area" aria-label="交易操作"></section>
+      </section>
+    </section>
+
+    <!-- 下方经营区 -->
+    <details id="side" open>
+      <summary>经营手册</summary>
+      <nav id="tabs">
+        <button data-tab="shelf" class="tab active">货架</button>
+        <button data-tab="wholesale" class="tab">供货商</button>
+        <button data-tab="poke" class="tab">戳戳乐</button>
+        <button data-tab="sticker" class="tab">集贴纸</button>
+        <button data-tab="ledger" class="tab">赊账本</button>
+        <button data-tab="collection" class="tab">图鉴</button>
+        <button data-tab="regulars" class="tab">熟客</button>
+      </nav>
+      <div id="tab-pages"><!-- game.js 渲染各页签 --></div>
+    </details>
+  </main>
+
+  <dialog id="neighborhood" aria-labelledby="neighborhood-name">
+    <div id="neighborhood-portrait" aria-hidden="true"></div>
+    <h2 id="neighborhood-name"></h2>
+    <p id="neighborhood-line"></p>
+    <button id="promote-shop" type="button" class="btn gold">请帮忙宣传 ¥18</button>
+    <button id="close-neighborhood" type="button" class="btn">返回店里</button>
+  </dialog>
+  <dialog id="item-viewer" aria-labelledby="item-viewer-name">
+    <header class="item-viewer-header">
+      <h2 id="item-viewer-name"></h2>
+      <button id="close-item-viewer" type="button" class="btn small" autofocus>返回</button>
+    </header>
+    <button id="zoom-item" type="button" class="item-viewer-figure" aria-pressed="false"></button>
+    <p id="item-viewer-description"></p>
+    <p id="item-viewer-dates" class="mut"></p>
+    <button id="viewer-label" type="button" class="btn small hidden"></button>
+    <button id="viewer-shelf" type="button" class="btn small hidden">查看货架</button>
+  </dialog>
+
+  <dialog id="log-book" aria-labelledby="log-heading">
+    <div class="book-page">
+      <header class="book-header">
+        <h2 id="log-heading">小卖部流水账</h2>
+        <button type="button" id="close-log" class="btn small" autofocus>合上账本</button>
+      </header>
+      <ul id="log"></ul>
+    </div>
+  </dialog>
+
+  <!-- 结算弹窗 -->
+  <div id="modal-mask" class="hidden">
+    <div id="modal"></div>
+  </div>
+
+  <script src="js/data.js"></script>
+  <script src="js/systems.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
