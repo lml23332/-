@@ -11,7 +11,7 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const randInt = (a, b) => Math.floor(rand(a, b + 1));
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const itemById = (id) => ITEMS.find((i) => i.id === id) || WHOLESALE.find((i) => i.id === id);
+const itemById = (id) => ITEMS.find((i) => i.id === id) || WHOLESALE.find((i) => i.id === id) || GRILL.foods.find((i) => i.id === id);
 const regularById = (id) => REGULARS.find((r) => r.id === id);
 let uidSeq = 1;
 const nextUid = () => Date.now() * 100 + (uidSeq++ % 100);
@@ -24,14 +24,25 @@ let inspectionFace = 0;
 let inspectedPart = null;
 let noticeTimer;
 let viewedShelfUid = null;
-let tradePage = 'inspect';
 
 function newState() {
   return {
     day: 1,
     economyVersion: 1,
+    retailVersion: 1,
+    progress: { sales: 0, days: 0, kept: [] },
+    serviceTurns: 0,
+    repVisits: 0,
+    dailyRepLoss: 0,
+    neighborSeen: {},
+    neighborTalk: null,
+    grill: { owned: false, supplies: {}, slots: [], studentDay: 0 },
+    displaySlots: [],
     promoDay: 0,
     started: false,
+    shopOpen: false,
+    visitsToday: 0,
+    clockServed: 0,
     guide: true,
     openingMoney: CONFIG.startMoney,
     settlement: null,
@@ -74,8 +85,206 @@ function load() {
         s.current.age = 'adult';
       }
     }
+    if (!s.progress) {
+      const kept = [];
+      if (s.poke?.active || s.specialCards?.pokeGrand) kept.push('poke');
+      if (s.sticker?.on || s.specialCards?.jinlong) kept.push('sticker');
+      if (s.ledger?.length) kept.push('ledger');
+      if (s.shelf.some(stock => !stock.wholesale)) kept.push('receiving');
+      if (s.shelf.some(stock => !stock.wholesale && itemById(stock.itemId)?.base?.[1] > CONFIG.standardTradeMax)) kept.push('premium');
+      s.progress = { sales: 0, days: s.day - (s.settlement ? 0 : 1), kept };
+    }
+    if (s.poke && !Array.isArray(s.poke.opened)) {
+      s.poke.opened = Array.from({ length: s.poke.holesOpened || 0 }, (_, i) => i);
+      s.poke.dayOpened = 0;
+    }
+    if (s.poke && s.poke.dayLimit == null) {
+      s.poke.dayLimit = POKE.basePokes + (s.poke.grandTaken ? 0 : POKE.grandTraffic);
+    }
+    if (!s.retailVersion) {
+      // 旧店继续营业，移除新阶段尚未开放的收货访客。
+      const allowed = guest => guest.type !== 'seller' ||
+        (s.progress.kept.includes('receiving') && (s.progress.kept.includes('premium') ||
+          (itemById(guest.itemId)?.base?.[1] <= CONFIG.standardTradeMax && guest.ask <= CONFIG.standardTradeMax)));
+      s.queue = (s.queue || []).filter(allowed);
+      if (s.current && !allowed(s.current)) s.current = s.queue.shift() || null;
+      if (s.current?.type === 'buyer' && s.current.cap) {
+        if (!s.progress.kept.includes('premium')) s.current.cap = Math.min(s.current.cap, CONFIG.standardTradeMax);
+        const stock = s.shelf.find(entry => entry.uid === s.current.targetUid &&
+          (s.progress.kept.includes('premium') || entry.wholesale || itemById(entry.itemId)?.base?.[1] <= CONFIG.standardTradeMax));
+        s.current.receipt = stock ? [{ uid: stock.uid, price: s.current.offer }] : [];
+      }
+    }
+    if (!s.progress.kept.includes('receiving') && s.progress.sales < MILESTONES.receiving[0]) {
+      s.queue = (s.queue || []).filter(guest => guest.type !== 'seller');
+      if (s.current?.type === 'seller') s.current = null;
+    }
+    if (typeof s.shopOpen !== 'boolean') {
+      s.shopOpen = !!(s.settlement || s.current || s.queue?.length || s.wholesaleOrders?.length || s.daySales?.length);
+    }
     return Object.assign(newState(), { started: true, guide: false }, s); // 用默认值兜底新字段，保证老存档可续
   } catch (e) { return null; }
+}
+
+/* 柜台定价、库存成色、社区客流。存档中的货品保留原始真伪。 */
+function changeReputation(delta) {
+  const rules = CONFIG.reputation;
+  if (delta < 0) {
+    const loss = Math.min(-delta, rules.dailyLossLimit - state.dailyRepLoss);
+    state.dailyRepLoss += loss;
+    delta = -loss;
+  }
+  const previous = state.rep;
+  state.rep = clamp(state.rep + delta, rules.min, rules.max);
+  return state.rep - previous;
+}
+
+function countGoodVisit() {
+  state.repVisits++;
+  if (state.repVisits < CONFIG.reputation.visitsPerPoint) return;
+  state.repVisits = 0;
+  changeReputation(1);
+}
+
+function itemCategory(item) {
+  return FOOD_LIFE[item.id] ? '食品' : item.cat || '文具';
+}
+
+function wholesaleQuote(product) {
+  const index = WHOLESALE.indexOf(product);
+  const market = WHOLESALE_MARKET;
+  const slot = state.day - 1 + index * 2;
+  return {
+    cost: Math.max(1, product.cost + market.priceSteps[slot % market.priceSteps.length]),
+    soldOut: state.day >= market.shortageFromDay && slot % market.shortageCycle === market.shortageCycle - 1,
+  };
+}
+
+function stockCondition(stock) {
+  const life = FOOD_LIFE[stock.itemId];
+  if (life) {
+    const age = Math.max(0, state.day - (stock.stockedDay || state.day));
+    if (age >= life + 2) return 'spoiled';
+    if (age >= life) return 'expired';
+    if (age >= life - 2) return 'near';
+    return age === 0 ? 'fresh' : 'normal';
+  }
+  return stock.condition || (stock.wholesale ? 'mint' : stock.variant === 'bad' ? 'defective' : 'used');
+}
+
+function uniqueStock(entries) {
+  const byKind = new Map();
+  for (const entry of entries) {
+    const condition = entry.grilled ? grillStage(entry).key : stockCondition(entry);
+    const key = [entry.itemId, condition, entry.variant, !!entry.relabelled, counterPrice(entry)].join('/');
+    if (!byKind.has(key)) byKind.set(key, entry);
+  }
+  return [...byKind.values()];
+}
+
+function conditionBadge(stock) {
+  if (stock.grilled) return '<span class="condition condition-gold">' + grillStage(stock).name + '</span>';
+  const condition = CONDITION[stockCondition(stock)];
+  return '<span class="condition condition-' + condition.color + '">' + condition.name + '</span>';
+}
+
+function stockValue(stock) {
+  if (!FOOD_LIFE[stock.itemId]) return stock.value;
+  return Math.max(1, Math.round(stock.value * CONDITION[stockCondition(stock)].factor));
+}
+
+function retailPrice(stock) {
+  const base = stock.relabelled && stock.variant === 'fake' ? Math.round(stock.value / CONFIG.variantMult.fake) : stockValue(stock);
+  return Math.max(1, Math.round(base * STRATEGIES[state.strategy].mult));
+}
+
+function changeLabel(uid) {
+  const stock = state.shelf.find(entry => entry.uid === uid && entry.variant === 'fake');
+  if (!stock || state.settlement) return;
+  stock.relabelled = !stock.relabelled;
+  save();
+  renderAll();
+  if ($('#item-viewer').open) viewStock(uid);
+}
+
+function neighborTraffic() {
+  const friends = REGULARS.filter(person => getRegular(person.id).favor >= 5).length;
+  return clamp(Math.trunc(state.rep / 65) + Math.min(2, friends), -2, 4);
+}
+
+function serviceAvailable(key) {
+  const milestone = MILESTONES[key];
+  return !milestone || state.progress.kept.includes(key) ||
+    (state.progress.sales >= milestone[0] && state.progress.days >= milestone[1]);
+}
+
+function recruitShoppers() {
+  if (!serviceAvailable('organizer') || state.settlement || state.promoDay === state.day) return;
+  const { cost, extraBuyers } = NEIGHBORS.organizer;
+  if (state.money < cost) return notifyCashShortage(cost);
+  state.money -= cost;
+  state.promoDay = state.day;
+  for (let i = 0; i < extraBuyers; i++) state.queue.push({ type: 'buyer' });
+  notifyPlayer('社区宣传已安排，今天多来 ' + extraBuyers + ' 位买家。');
+  closeNeighborhood();
+  if (state.shopOpen && !state.current) nextVisitor();
+  else { renderAll(); save(); }
+}
+
+function buyerObjection(guest, stock) {
+  if (stock.grilled) {
+    const stage = grillStage(stock);
+    return stage.checkChance && Math.random() < stage.checkChance ? '这串还没熟，我先不买了。' : '';
+  }
+  const category = itemCategory(itemById(stock.itemId));
+  const condition = stockCondition(stock);
+  if ((condition === 'expired' || condition === 'spoiled') && Math.random() < .5) {
+    return '我看了保质期，这个已经过期了。';
+  }
+  if (stock.variant !== 'fake') return '';
+  const specialty = (guest.age === 'older' && ['收藏', '日用'].includes(category)) ||
+    (guest.age === 'young' && ['玩具', '卡牌', '电器'].includes(category));
+  const chance = specialty ? .65 : .25;
+  if (Math.random() >= chance) return '';
+  return stock.relabelled ? '标签写的是真品，可这件是仿的。' : '我认得这件，这是赝品。';
+}
+
+function renderNeighborhood() {
+  const role = state.neighborTalk;
+  $('#shop-organizer').classList.toggle('hidden', !serviceAvailable('organizer'));
+  $('#shop-npc').setAttribute('aria-expanded', String(role === 'mentor'));
+  $('#shop-organizer').setAttribute('aria-expanded', String(role === 'organizer'));
+  $('#neighborhood').classList.toggle('hidden', !role);
+  if (!role) return;
+  const person = NEIGHBORS[role];
+  $('#neighborhood-portrait').dataset.npc = role;
+  $('#neighborhood-name').textContent = person.name;
+  const rent = CONFIG.rentBase + (state.day / CONFIG.rentCycle - 1) * CONFIG.rentStep;
+  $('#neighborhood-line').textContent = role === 'mentor' && state.day % CONFIG.rentCycle === 0
+    ? '今天收摊要交房租 ¥' + rent + '，记得留够钱。' : person.line;
+  const promote = $('#promote-shop');
+  promote.classList.toggle('hidden', role !== 'organizer' || !!state.settlement);
+  promote.textContent = '请帮忙宣传 ¥' + NEIGHBORS.organizer.cost;
+  promote.disabled = state.promoDay === state.day;
+}
+
+function openNeighborhood(role) {
+  if (!NEIGHBORS[role]) return;
+  state.neighborTalk = role;
+  state.neighborSeen[role] = true;
+  renderNeighborhood(); save();
+}
+
+function closeNeighborhood() {
+  state.neighborTalk = null;
+  showNewNeighbor();
+  renderNeighborhood(); save();
+}
+
+function showNewNeighbor() {
+  if (!state.started || state.neighborTalk) return;
+  if (!state.neighborSeen.mentor) openNeighborhood('mentor');
+  else if (serviceAvailable('organizer') && !state.neighborSeen.organizer) openNeighborhood('organizer');
 }
 
 /* ---------------- 日志 ---------------- */
@@ -120,24 +329,25 @@ function rollVariant(regular) {
   return 'fake';
 }
 
-function makeSeller(demoItemId) {
+function makeSeller() {
   const useRegular = Math.random() < 0.35;
   const reg = useRegular ? pick(REGULARS) : null;
   const person = reg || pick(SELLERS);
   // 熟客优先带来偏好物品，好感≥6 时保真好货
-  let item;
-  if (reg && Math.random() < 0.6) item = itemById(pick(reg.favItems));
-  else item = pick(ITEMS);
-  if (demoItemId) item = itemById(demoItemId);
+  const earlyTrade = !serviceAvailable('premium');
+  const pool = earlyTrade ? ITEMS.filter(item => item.base[1] <= CONFIG.standardTradeMax) : ITEMS;
+  const favorites = reg ? pool.filter(item => reg.favItems.includes(item.id)) : [];
+  const item = pick(favorites.length && Math.random() < 0.6 ? favorites : pool);
   let variant = rollVariant(reg);
   if (reg && getRegular(reg.id).favor >= CONFIG.favorSpecialAt && Math.random() < 0.3) variant = 'real';
   const base = randInt(item.base[0], item.base[1]);
   const condition = variant === 'bad' ? pick(['broken', 'defective']) : Math.random() < clamp(.20 + state.rep / 1000, .05, .42) ? 'mint' : 'used';
   const factor = variant === 'fake' ? CONFIG.variantMult.fake : CONDITION[condition].factor;
   const value = Math.max(1, Math.round(base * factor));
-  const ask = variant === 'bad'
+  const requested = variant === 'bad'
     ? Math.max(2, Math.round(base * rand(CONFIG.sellerAskBad[0], CONFIG.sellerAskBad[1])))
     : Math.max(2, Math.round(base * rand(CONFIG.sellerAskReal[0], CONFIG.sellerAskReal[1])));
+  const ask = earlyTrade ? Math.min(requested, CONFIG.standardTradeMax) : requested;
   const bottom = clamp(Math.round(value * rand(CONFIG.sellerBottom[0], CONFIG.sellerBottom[1])), 1, ask);
   return {
     type: 'seller', name: reg ? person.name : /学生|女生/.test(person.name) ? '年轻卖家' : '路过的卖家',
@@ -149,50 +359,99 @@ function makeSeller(demoItemId) {
   };
 }
 
-function makeBuyer() {
-  const displayed = state.shelf.filter(stock => stock.displayed !== false);
-  const available = [...new Set(displayed.map(stock => itemCategory(itemById(stock.itemId))))];
-  const categories = ['食品', '文具', '玩具', '收藏', '电器', '卡牌', '日用', '潮流'];
-  const useRegular = Math.random() < .35;
-  const person = useRegular ? pick(REGULARS) : pick(BUYERS);
+function makeBuyer(student = false) {
+  const rules = CONFIG.retail;
+  const stock = counterInventory().filter(retailAvailable);
+  const useRegular = !student && Math.random() < .35;
+  const person = student ? { name: pick(GRILL.studentNames), avatar: '🎒' } : useRegular ? pick(REGULARS) : pick(BUYERS);
   const age = /老|爷|叔/.test(person.name) ? 'older' : /学生|豆包|年轻/.test(person.name) ? 'young' : 'adult';
-  const wanted = pick(available.length && Math.random() < .8 ? available : categories);
-  const target = displayed.find(stock => itemCategory(itemById(stock.itemId)) === wanted);
-  const usualBudget = wanted === '食品' || wanted === '文具' ? randInt(6, 20) : randInt(30, 115);
+  const selfPick = stock.length > 0 && Math.random() < rules.selfPickChance;
+  const hot = student ? stock.filter(entry => entry.grilled) : [];
+  const pool = hot.length ? hot : stock;
+  const anchor = pool.length ? pick(uniqueStock(pool)) : null;
+  const product = anchor ? itemById(anchor.itemId) : null;
+  const premium = product && product.base?.[1] > CONFIG.standardTradeMax && serviceAvailable('premium');
+  const range = student ? rules.everydayBudget : premium ? rules.premiumBudget
+    : anchor && !anchor.wholesale ? rules.specialtyBudget : rules.everydayBudget;
   const favor = useRegular ? getRegular(person.id).favor : 0;
-  const cap = Math.max(3, Math.round(usualBudget * (1 + state.rep / 400 + Math.max(0, favor) * .025)));
-  return {
-    type: 'buyer', name: useRegular ? person.name : age === 'young' ? '年轻顾客' : age === 'older' ? '路过的街坊' : '路过的顾客',
-    portraitName: person.name, avatar: person.avatar, age, wanted, cap,
-    line: '今天想买' + wanted + '，预算 ¥' + cap + '。',
-    regularId: useRegular ? person.id : null, targetUid: target ? target.uid : null,
-    offer: target ? retailPrice(target) : 0, patience: 2,
+  const budget = Math.max(3, Math.round(randInt(...range) * (1 + state.rep / 400 + favor * .025)));
+  const cap = !serviceAvailable('premium') ? Math.min(budget, CONFIG.standardTradeMax) : budget;
+  const wantedItem = !selfPick && product && Math.random() < rules.specificChance ? product.id : null;
+  const wantedCondition = wantedItem && !anchor.grilled && Math.random() < rules.conditionChance ? stockCondition(anchor) : null;
+  const guest = {
+    type: 'buyer', name: student ? person.name : useRegular ? person.name : age === 'young' ? '年轻顾客' : age === 'older' ? '路过的街坊' : '路过的顾客',
+    portraitName: person.name, avatar: person.avatar, age, cap, selfPick, wantedItem, wantedCondition,
+    regularId: useRegular ? person.id : null, receipt: [],
     creditAsk: serviceAvailable('ledger') && useRegular && Math.random() < CONFIG.creditChance,
   };
+  const condition = wantedCondition ? CONDITION[wantedCondition].name + '的' : '';
+  guest.line = (wantedItem ? '帮我拿一件' + condition + product.name + '。'
+    : student ? '有热食吗？也可以帮我挑点别的。' : '帮我挑几样合适的吧。') + '我带了 ¥' + cap + '。';
+  if (selfPick) fillSelfPickedReceipt(guest, pool);
+  return guest;
 }
 
-function startDay() {
+function fillSelfPickedReceipt(guest, stock) {
+  let remaining = guest.cap;
+  const count = randInt(...CONFIG.retail.selfPickCount);
+  const selected = new Set();
+  for (let i = 0; i < count; i++) {
+    const affordable = stock.filter(entry => !selected.has(entry.uid) && counterPrice(entry) <= remaining);
+    if (!affordable.length) break;
+    const entry = pick(affordable);
+    const price = counterPrice(entry);
+    guest.receipt.push({ uid: entry.uid, price });
+    selected.add(entry.uid);
+    remaining -= price;
+  }
+  guest.line = guest.receipt.length ? '我挑好了这些，你帮我结一下。预算 ¥' + guest.cap + '。'
+    : '我带了 ¥' + guest.cap + '，能帮我挑几样吗？';
+  guest.selfPick = guest.receipt.length > 0;
+}
+
+function enqueueBuyers() {
+  const count = clamp(CONFIG.buyersGuaranteed + STRATEGIES[state.strategy].buyers + neighborTraffic(), ...CONFIG.retail.buyerCount);
+  for (let i = 0; i < count; i++) state.queue.push({ type: 'buyer' });
+}
+
+function prepareDay() {
+  state.shopOpen = false;
+  state.visitsToday = 0;
+  state.clockServed = 0;
+  state.current = null;
+  tradeOpen = false;
   state.openingMoney = state.money;
   state.wholesaleOrders = [];
   state.settlement = null;
   state.daySales = [];
   state.pendingComplaints = 0;
-  const sellerCount = CONFIG.sellersPerDay + (state.rep >= 65 ? 1 : 0);
-  const queue = [];
-  const demo = state.day === 1 && state.guide && !state.shelf.length ? makeSeller('youxiji') : null;
-  for (let i = demo ? 1 : 0; i < sellerCount; i++) queue.push(makeSeller());
-  // 买家：货架有货才来，保底人数受策略与口碑修正（最低 1）
-  if (state.shelf.length) {
-    let buyerCount = CONFIG.buyersGuaranteed + STRATEGIES[state.strategy].buyers + neighborTraffic();
-    buyerCount = clamp(buyerCount, 1, 8);
-    for (let i = 0; i < buyerCount; i++) queue.push({ type: 'buyer' });
+  state.dailyRepLoss = 0;
+  state.poke.dayOpened = 0;
+  state.poke.dayLimit = POKE.basePokes + (state.poke.grandTaken ? 0 : POKE.grandTraffic);
+  state.queue = [];
+}
+
+function startDay() {
+  if (state.shopOpen || state.settlement) return;
+  state.shopOpen = true;
+  if (serviceAvailable('receiving')) {
+    const count = CONFIG.sellersPerDay + (state.rep >= 65 ? 1 : 0);
+    for (let i = 0; i < count; i++) state.queue.push(makeSeller());
   }
-  // 卖家与买家穿插
-  for (let i = queue.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [queue[i], queue[j]] = [queue[j], queue[i]]; }
-  if (demo) queue.unshift(demo);
-  state.queue = queue;
-  state.current = null;
-  addLog(`开店啦，今天有 ${queue.length} 位顾客排队。`);
+  enqueueBuyers();
+  for (let i = state.queue.length - 1; i > 0; i--) {
+    const j = randInt(0, i);
+    [state.queue[i], state.queue[j]] = [state.queue[j], state.queue[i]];
+  }
+  enqueueStudents();
+  addLog(`开店啦，今天有 ${state.queue.length} 位顾客排队。`);
+  nextVisitor();
+  $(state.current ? '#guest-call' : '#btn-endday').focus();
+}
+
+function finishVisit() {
+  state.serviceTurns++;
+  state.visitsToday++;
   nextVisitor();
 }
 
@@ -200,17 +459,16 @@ function nextVisitor() {
   const returnFocus = tradeOpen;
   tradeOpen = false;
   inspectionFace = 0;
-  tradePage = 'inspect';
   inspectedPart = null;
   state.current = null;
   while (!state.current && state.queue.length) {
     const visitor = state.queue.shift();
     // 买家到柜台时按当前库存选货并报价。
-    state.current = visitor.type === 'buyer' ? makeBuyer() : visitor;
+    state.current = visitor.type === 'buyer' ? makeBuyer(visitor.student) : visitor;
     if (!state.current) addLog('有买家探头看了一眼：货架空了，先走了。');
   }
-  if (state.current && state.current.type === 'buyer' && buyerTarget()) tradePage = 'quote';
   if (state.current && state.current.regularId) getRegular(state.current.regularId).visits++;
+  showNewNeighbor();
   renderAll(); save();
   if (returnFocus) $(state.current ? '#guest-call' : '#btn-endday').focus();
 }
@@ -269,10 +527,10 @@ function resolveBid(bid) {
   if (bid > state.money) return notifyCashShortage(bid);
   if (bid >= c.bottom) return buyFromSeller(bid);
   if (c.openingBid) {
-    changeReputation(-4);
+    const loss = -changeReputation(-CONFIG.reputation.failedBidLoss);
     if (c.regularId) addFavor(c.regularId, -1);
-    notifyPlayer(`${c.name} 没接受最后的 ¥${bid}，带着东西走了。口碑 −4。`, true);
-    return nextVisitor();
+    notifyPlayer(`${c.name} 没接受最后的 ¥${bid}，带着东西走了。${loss ? '口碑 −' + loss + '。' : ''}`, true);
+    return finishVisit();
   }
   c.openingBid = bid;
   c.lastWords = `¥${bid} 太低了。你可以再报一次，合适我就卖。`;
@@ -284,11 +542,11 @@ function buyFromSeller(price) {
   const item = itemById(c.itemId);
   state.money -= price;
   state.shelf.push({ uid: nextUid(), itemId: c.itemId, variant: c.variant, condition: c.condition, value: c.value, cost: price, stockedDay: state.day });
-  changeReputation(1);
+  countGoodVisit();
   markCollection(c.itemId, c.variant);
   if (c.regularId) addFavor(c.regularId, +1);
-  notifyPlayer(`以 ¥${price} 收下${item.name}。鉴定结果：${CONFIG.variantName[c.variant]}，估值 ¥${c.value}。`, true);
-  nextVisitor();
+  notifyPlayer(`以 ¥${price} 收下${item.name}。鉴定结果：${CONFIG.variantName[c.variant]}。`, true);
+  finishVisit();
 }
 
 function refuseSeller() {
@@ -296,71 +554,225 @@ function refuseSeller() {
   if (!c) return;
   addLog(`你摆摆手，${c.name} 拿着东西走了。`);
   if (c.regularId) addFavor(c.regularId, -1);
-  nextVisitor();
+  finishVisit();
 }
 
 /* ============================================================
  * 柜台接待：买家（成交 / 抬价 / 不卖 / 赊账）
  * ============================================================ */
-function buyerTarget() {
-  const c = state.current;
-  return state.shelf.find((s) => s.uid === c.targetUid) || null;
+function retailAvailable(stock) {
+  if (stock.grilled) return grillStage(stock).factor > 0;
+  return stock.displayed !== false && (serviceAvailable('premium') || stock.wholesale ||
+    itemById(stock.itemId).base[1] <= CONFIG.standardTradeMax);
 }
 
-function settleBuyerSale(price, onCredit, gift = 0, discount = false) {
-  const c = state.current;
-  const t = buyerTarget();
-  if (!t) return nextVisitor();
-  const objection = buyerObjection(c, t);
-  if (objection) {
-    const penalty = t.relabelled ? 10 : 6;
-    changeReputation(-penalty);
-    if (c.regularId) addFavor(c.regularId, -2);
-    notifyPlayer(c.name + '：' + objection + ' 口碑 −' + penalty + '。', true);
-    return nextVisitor();
+function counterPrice(stock) {
+  if (stock.grilled) return Math.max(1, Math.round(stock.value * grillStage(stock).factor));
+  const price = retailPrice(stock);
+  return serviceAvailable('clearance') && stockCondition(stock) === 'near'
+    ? Math.max(1, Math.round(price * CONFIG.retail.clearanceMultiplier)) : price;
+}
+
+function receiptLines(guest) {
+  return guest.receipt.flatMap(row => {
+    const stock = counterInventory().find(entry => entry.uid === row.uid);
+    return stock ? [{ row, stock, item: itemById(stock.itemId) }] : [];
+  });
+}
+
+function receiptTotal(guest) {
+  return guest.receipt.reduce((sum, row) => sum + row.price, 0);
+}
+
+function receiptQuote(guest) {
+  const rules = CONFIG.retail;
+  const subtotal = receiptTotal(guest);
+  const discounted = guest.discounted ? Math.round(subtotal * rules.receiptDiscount) : subtotal;
+  const discount = subtotal - discounted;
+  const budget = guest.cap + (discount ? rules.discountBudgetBoost : 0);
+  const roundOff = discounted - budget === rules.roundOffAmount ? rules.roundOffAmount : 0;
+  return { subtotal, discount, budget, roundOff, total: discounted - roundOff };
+}
+
+function buyerReply(guest, quote) {
+  const replies = [];
+  if (guest.upsellReply) replies.push(guest.upsellReply);
+  if (quote.discount) replies.push('整单打九折呀！我再拿 ¥' + CONFIG.retail.discountBudgetBoost + '，预算一共 ¥' + quote.budget + '。');
+  if (quote.roundOff) replies.push('就差 ¥' + quote.roundOff + '，能帮我抹个零吗？');
+  return replies.join(' ');
+}
+
+function updateReceipt(guest) {
+  const quote = receiptQuote(guest);
+  const reply = buyerReply(guest, quote);
+  $('#receipt-total').textContent = '¥' + quote.total;
+  $('#receipt-savings').textContent = [
+    quote.discount ? '原价 ¥' + quote.subtotal + ' · 整单优惠 −¥' + quote.discount : '',
+    quote.roundOff ? '抹零 −¥' + quote.roundOff : '',
+  ].filter(Boolean).join(' · ');
+  const over = quote.total > quote.budget;
+  $('#receipt-budget').textContent = over ? '超出预算 ¥' + (quote.total - quote.budget) : '预算余 ¥' + (quote.budget - quote.total);
+  $('#receipt-budget').classList.toggle('over-budget', over);
+  $('#receipt-discount').disabled = !guest.discounted && Math.round(quote.subtotal * CONFIG.retail.receiptDiscount) === quote.subtotal;
+  $('#buyer-reply').textContent = reply;
+  $('#buyer-reply').classList.toggle('hidden', !reply);
+  renderDialogue(guest, guest.regularId ? '熟客 · 买家' : '买家', [guest.line, reply].filter(Boolean));
+}
+
+function toggleReceiptDiscount() {
+  const guest = state.current;
+  if (guest?.type !== 'buyer' || !guest.receipt.length) return;
+  guest.discounted = !guest.discounted;
+  $('#receipt-discount').textContent = guest.discounted ? '取消九折' : '整单 −10%';
+  $('#receipt-discount').setAttribute('aria-pressed', String(guest.discounted));
+  updateReceipt(guest);
+  save();
+}
+
+function editReceipt(uid, action) {
+  const guest = state.current;
+  if (guest?.type !== 'buyer' || state.settlement) return;
+  const row = guest.receipt.find(entry => entry.uid === uid);
+  const stock = counterInventory().find(entry => entry.uid === uid);
+  if (action === 'add' && !guest.selfPick && stock && retailAvailable(stock) && !row) {
+    guest.receipt.push({ uid, price: counterPrice(stock) });
+  } else if (action === 'remove' && row) {
+    guest.receipt = guest.receipt.filter(entry => entry !== row);
+  } else if (action === 'label' && row && stock && !stock.grilled) {
+    row.upgraded = !row.upgraded;
   }
-  const item = itemById(t.itemId);
-  state.shelf = state.shelf.filter((s) => s.uid !== t.uid);
-  if (onCredit) {
-    const due = state.day + randInt(CONFIG.creditDueDays[0], CONFIG.creditDueDays[1]);
-    state.ledger.push({ id: nextUid(), regularId: c.regularId, whoName: c.name, amount: price, due, done: false, result: null });
-    notifyPlayer(`${c.name} 赊购${item.name}，欠款 ¥${price}，第 ${due} 天到期。`, true);
+  renderVisitor(); save();
+}
+
+function canRecommend(guest) {
+  return guest.selfPick && !guest.upsold && guest.regularId &&
+    getRegular(guest.regularId).favor >= CONFIG.retail.upsellFavor;
+}
+
+function recommendStock(uid) {
+  const guest = state.current;
+  if (guest?.type !== 'buyer' || state.settlement || !canRecommend(guest)) return;
+  const stock = counterInventory().find(entry => entry.uid === uid);
+  if (!stock || !retailAvailable(stock) || guest.receipt.some(row => row.uid === uid)) return;
+  const row = { uid, price: counterPrice(stock) };
+  const quote = receiptQuote({ ...guest, receipt: [...guest.receipt, row] });
+  if (quote.total > quote.budget) {
+    guest.upsellReply = '这件先不加啦，钱不够。';
   } else {
-    state.money += price;
-    state.daySales.push({ itemId: item.id, label: `${c.name} 买走${item.name}`, revenue: price, profit: price - t.cost });
-    addLog(`${c.name} 以 ¥${price} 买走了${item.name}（成本 ¥${t.cost}，净赚 ¥${price - t.cost}）。`);
+    guest.upsellReply = '好，再帮我加一件' + itemById(stock.itemId).name + '。';
+    guest.upsold = true;
+    guest.receipt.push(row);
   }
-  changeReputation(1 + (discount ? 2 : 0) + Math.min(6, Math.ceil(gift / 10)));
-  if (c.regularId) addFavor(c.regularId, 1 + (discount ? 1 : 0) + Math.min(3, Math.ceil(gift / 15)));
-  if (gift) addLog('你让出 ¥' + gift + ' 差价，作为赠予。');
-  nextVisitor();
+  renderVisitor(); save();
 }
 
-function buyerAccept() { buyerDeal('normal'); }
-function buyerCredit() { if (serviceAvailable('ledger')) buyerDeal('credit'); }
+function allocateReceipt(lines, quote) {
+  let running = 0;
+  let allocated = 0;
+  return lines.map(line => {
+    running += line.row.price;
+    const share = quote.subtotal ? Math.round(quote.total * running / quote.subtotal) : 0;
+    const revenue = share - allocated;
+    allocated = share;
+    return { ...line, revenue };
+  });
+}
 
-function buyerRaise() {
-  const c = state.current;
-  if (!c || c.type !== 'buyer') return;
-  const want = Math.round(c.offer * 1.15);
-  if (want <= c.cap) { c.offer = want; c.lastWords = '行行行，就这个价，成交！'; return settleBuyerSale(want, false); }
-  c.patience--;
-  if (c.patience <= 0) {
-    changeReputation(-5);
-    if (c.regularId) addFavor(c.regularId, -1);
-    notifyPlayer(`${c.name}：太贵了，我不要了。口碑 −5。`, true);
-    return nextVisitor();
+function acceptablePrice(stock) {
+  const tolerance = CONFIG.retail.priceTolerance;
+  const quality = stock.grilled ? grillStage(stock).key : stockCondition(stock);
+  const multiplier = stock.variant === 'real' ? tolerance[quality] || tolerance.standard : tolerance.standard;
+  return Math.floor(counterPrice(stock) * multiplier);
+}
+
+function editReceiptPrice(uid, input) {
+  const guest = state.current;
+  const row = guest?.receipt?.find(entry => entry.uid === uid);
+  if (!row) return;
+  const price = Number(input.value);
+  const valid = input.value !== '' && Number.isInteger(price) && price >= 0 && price <= CONFIG.retail.maxUnitPrice;
+  if (valid) {
+    row.price = price;
+    updateReceipt(guest);
+    save();
   }
-  c.offer = want;
-  c.lastWords = '你这价我实在接不住，最多这个数了。';
-  renderAll(); save();
+}
+
+function receiptObjection(guest, lines) {
+  if (guest.wantedItem && !lines.some(({ row, stock }) =>
+    stock.itemId === guest.wantedItem && (!guest.wantedCondition ||
+      (row.upgraded ? betterLabel(stock) : stockCondition(stock)) === guest.wantedCondition))) {
+    return '我想买的是刚才点的那件，能换一下吗？';
+  }
+  return '';
+}
+
+function betterLabel(stock) {
+  return FOOD_LIFE[stock.itemId] ? 'fresh' : 'mint';
+}
+
+function settleBuyerSale(onCredit = false) {
+  const guest = state.current;
+  if (guest?.type !== 'buyer' || state.settlement || !guest.receipt.length) return;
+  if (onCredit && (!guest.creditAsk || !serviceAvailable('ledger'))) return;
+  const quote = receiptQuote(guest);
+  const lines = allocateReceipt(receiptLines(guest), quote);
+  if (lines.length !== guest.receipt.length || lines.some(({ stock }) => !retailAvailable(stock))) return notifyPlayer('小票里的库存有变动，请重新选货。');
+  const { total } = quote;
+  if (onCredit && total === 0) return notifyPlayer('小票合计为零，可以直接结账。');
+  if (total > quote.budget) return notifyPlayer('小票超过顾客预算，可以打折、减价或删掉商品。');
+  const mismatch = receiptObjection(guest, lines);
+  if (mismatch) return notifyPlayer(guest.name + '：' + mismatch);
+  const overpriced = lines.find(({ stock, revenue }) => revenue > acceptablePrice(stock));
+  if (overpriced) return notifyPlayer(guest.name + '：' + overpriced.item.name + '这个价有点高，能便宜些吗？');
+  for (const { row, stock, item } of lines) {
+    const relabelled = row.upgraded || stock.relabelled;
+    const caught = row.upgraded && Math.random() < CONFIG.retail.conditionCheckChance;
+    const objection = caught ? item.name + '的品质和标签对不上。' : buyerObjection(guest, stock);
+    if (objection) {
+      const penalty = relabelled ? CONFIG.retail.conditionPenalty : -CONFIG.fakeComplaintRep;
+      const loss = -changeReputation(-penalty);
+      if (guest.regularId) addFavor(guest.regularId, -1);
+      notifyPlayer(guest.name + '：' + objection + (loss ? ' 口碑 −' + loss + '。' : ''), true);
+      return finishVisit();
+    }
+  }
+  const sold = new Set(lines.map(({ stock }) => stock.uid));
+  state.shelf = state.shelf.filter(stock => !sold.has(stock.uid));
+  state.grill.slots = state.grill.slots.filter(stock => !sold.has(stock.uid));
+  const label = guest.name + ' 买走 ' + lines.length + ' 件商品';
+  if (onCredit) {
+    const due = state.day + randInt(...CONFIG.creditDueDays);
+    state.ledger.push({ id: nextUid(), regularId: guest.regularId, whoName: guest.name, amount: total, due, done: false, result: null });
+    notifyPlayer(`${label}，赊账 ¥${total}，第 ${due} 天到期。`, true);
+  } else {
+    state.money += total;
+    if (total > 0) state.progress.sales++;
+    for (const { stock, item, revenue } of lines) {
+      state.daySales.push({ itemId: item.id, label: guest.name + ' 买走' + item.name, revenue, profit: revenue - stock.cost });
+    }
+    addLog(`${label}，实收 ¥${total}。`);
+  }
+  const discount = total < lines.reduce((sum, { stock }) => sum + counterPrice(stock), 0);
+  const fresh = lines.some(({ stock, revenue }) => revenue > 0 && stockCondition(stock) === 'fresh');
+  const courtesy = quote.discount || quote.roundOff;
+  if (total > 0) countGoodVisit();
+  const bonus = (courtesy ? CONFIG.retail.courtesyFavor : 0) + (fresh ? CONFIG.retail.freshSaleFavor : 0);
+  if (guest.regularId) addFavor(guest.regularId, (discount ? 2 : 1) + bonus);
+  if (fresh || courtesy) changeReputation((fresh ? CONFIG.retail.freshSaleReputation : 0) + (courtesy ? CONFIG.retail.courtesyReputation : 0));
+  if (courtesy) {
+    finishVisit();
+    notifyPlayer(guest.name + (quote.roundOff ? '：谢谢你帮我抹零！' : '：谢谢你给我打折！'));
+    return;
+  }
+  finishVisit();
 }
 
 function buyerRefuse() {
   const c = state.current;
   if (!c) return;
   addLog(`你把东西放回货架，${c.name} 恋恋不舍地走了。`);
-  nextVisitor();
+  finishVisit();
 }
 
 /* ============================================================
@@ -368,7 +780,7 @@ function buyerRefuse() {
  * ============================================================ */
 function orderWholesale(id) {
   const product = WHOLESALE.find(item => item.id === id);
-  if (!product || state.day < (product.unlockDay || 1) || state.settlement || state.wholesaleOrders.includes(id)) return;
+  if (!product || !serviceAvailable(product.unlock) || state.settlement || state.wholesaleOrders.includes(id)) return;
   const { cost, soldOut } = wholesaleQuote(product);
   if (soldOut) return;
   const total = cost * product.pack;
@@ -385,8 +797,8 @@ function orderWholesale(id) {
   }
   addLog(`供货商送来 ${product.name} ×${product.pack}，进货支出 ¥${total}。`);
 
-  if (firstOrder && (!state.current || state.current.type !== 'buyer') && !state.queue.some(visitor => visitor.type === 'buyer')) {
-    state.queue.push({ type: 'buyer' });
+  if (state.shopOpen && firstOrder && (!state.current || state.current.type !== 'buyer') && !state.queue.some(visitor => visitor.type === 'buyer')) {
+    enqueueBuyers();
     if (!state.current) return nextVisitor();
   }
   renderAll(); save();
@@ -402,13 +814,58 @@ function setStrategy(key) {
 function pokeStock(grandItemId) {
   if (!serviceAvailable('poke') || state.settlement || state.poke.active) return;
   const g = POKE.grands.find((x) => x.itemId === grandItemId);
+  if (!g || !pokePrizeAvailable(g)) return;
   const total = POKE.boardCost + g.cost;
   if (state.money < total) return notifyCashShortage(total);
   state.money -= total;
-  state.poke = { active: true, holesLeft: POKE.holes, holesOpened: 0, grandId: grandItemId, grandPos: randInt(0, POKE.holes - 1), grandTaken: false };
+  state.poke = { active: true, holesLeft: POKE.holes, opened: [], dayOpened: 0,
+    dayLimit: POKE.basePokes + POKE.grandTraffic,
+    grandId: grandItemId, grandPos: randInt(0, POKE.holes - 1), grandTaken: false };
   state.specialCards.pokeGrand = true;
   addLog(`戳戳乐进货上架！大奖是${itemById(grandItemId).name}，一共花了 ¥${total}。`);
   renderAll(); save();
+}
+
+function pokePrizeAvailable(prize) {
+  return prize.cost <= CONFIG.standardTradeMax || serviceAvailable('premium');
+}
+
+function pokeDemand() {
+  const pk = state.poke;
+  return Math.max(0, Math.min(pk.holesLeft, pk.dayLimit - pk.dayOpened));
+}
+
+function openPokeHole(index) {
+  const pk = state.poke;
+  if (!pk.active || state.settlement || !pokeDemand() || !Number.isInteger(index) ||
+      index < 0 || index >= POKE.holes || pk.opened.includes(index)) return false;
+  pk.opened.push(index);
+  pk.dayOpened++;
+  pk.holesLeft--;
+  if (index === pk.grandPos) {
+    pk.grandTaken = true;
+    addLog('戳戳乐开出了大奖 ' + itemById(pk.grandId).name + '！');
+  }
+  return true;
+}
+
+function pokeAtCounter(index) {
+  if (!openPokeHole(index)) return;
+  renderAll(); save();
+  $('.poke-hole:not(:disabled)')?.focus();
+}
+
+function settlePoke(others) {
+  const pk = state.poke;
+  if (!pk.active) return;
+  for (let i = 0; i < POKE.holes && pokeDemand(); i++) openPokeHole(i);
+  const net = pk.dayOpened * (POKE.price - POKE.smallPrizeCost);
+  state.money += net;
+  if (pk.dayOpened) others.push({ label: '戳戳乐开洞 ×' + pk.dayOpened, amount: net });
+  if (!pk.holesLeft) {
+    pk.active = false;
+    addLog('戳戳乐板子戳完了，该重新进货了。');
+  }
 }
 
 function stickerToggle() {
@@ -424,11 +881,77 @@ function stickerSetRare(v) {
   renderAll(); save();
 }
 
+/* 烤肠机按送走顾客的次数计时，备货和查看界面不推进。 */
+function counterInventory() {
+  return [...state.shelf, ...state.grill.slots];
+}
+
+function grillStage(stock) {
+  const age = state.serviceTurns - stock.placedAt;
+  return GRILL.stages.reduce((current, stage) => age >= stage.turns ? stage : current, GRILL.stages[0]);
+}
+
+function enqueueStudents() {
+  if (!state.grill.owned || state.grill.studentDay === state.day) return;
+  state.grill.studentDay = state.day;
+  for (let i = 0; i < GRILL.extraStudents; i++) state.queue.push({ type: 'buyer', student: true });
+}
+
+function buyGrill() {
+  if (!serviceAvailable('grill') || state.grill.owned || state.settlement) return;
+  if (state.money < GRILL.cost) return notifyCashShortage(GRILL.cost);
+  state.money -= GRILL.cost;
+  state.grill.owned = true;
+  addLog('烤肠机到货，放学时会多来几位学生。');
+  if (state.shopOpen) {
+    enqueueStudents();
+    if (!state.current) return nextVisitor();
+  }
+  renderAll(); save();
+}
+
+function orderGrillFood(id) {
+  const food = GRILL.foods.find(item => item.id === id);
+  if (!food || !state.grill.owned || state.settlement || state.wholesaleOrders.includes(id)) return;
+  const total = food.cost * food.pack;
+  if (state.money < total) return notifyCashShortage(total);
+  state.money -= total;
+  state.wholesaleOrders.push(id);
+  state.grill.supplies[id] = (state.grill.supplies[id] || 0) + food.pack;
+  addLog('进货 ' + food.name + ' ×' + food.pack + '，支出 ¥' + total + '。');
+  renderAll(); save();
+}
+
+function placeGrillFood(id) {
+  const food = GRILL.foods.find(item => item.id === id);
+  if (!food || !state.grill.owned || state.settlement ||
+      !state.grill.supplies[id] || state.grill.slots.length >= GRILL.capacity) return;
+  state.grill.supplies[id]--;
+  state.grill.slots.push({
+    uid: nextUid(), itemId: id, cost: food.cost, value: food.value, variant: 'real',
+    grilled: true, placedAt: state.serviceTurns,
+  });
+  renderAll(); save();
+}
+
+function discardGrillFood(uid) {
+  if (state.settlement) return;
+  const stock = state.grill.slots.find(entry => entry.uid === uid);
+  if (!stock) return;
+  state.grill.slots = state.grill.slots.filter(entry => entry !== stock);
+  if (state.current?.type === 'buyer') {
+    state.current.receipt = state.current.receipt.filter(row => row.uid !== uid);
+  }
+  addLog('从烤肠机上撤下了' + itemById(stock.itemId).name + '。');
+  renderAll(); save();
+}
+
 /* ============================================================
  * 收摊结算
  * ============================================================ */
 function endDay() {
   if (state.settlement) return showSettlement(state.settlement);
+  if (!state.shopOpen) return;
   if (state.current || state.queue.length) return notifyPlayer('还有顾客在等，先接待完再收摊。');
   const strat = STRATEGIES[state.strategy];
   const cashBeforeClosing = state.money;
@@ -439,7 +962,7 @@ function endDay() {
   // 1) 收摊自动售卖
   const remain = [];
   for (const s of state.shelf) {
-    if (Math.random() < strat.autoRate) {
+    if (retailAvailable(s) && Math.random() < strat.autoRate) {
       const price = Math.max(1, Math.round(stockValue(s) * strat.autoMult));
       state.money += price;
       autoList.push({ itemId: s.itemId, label: `自动售出 ${itemById(s.itemId).name}`, revenue: price, profit: price - s.cost });
@@ -465,7 +988,7 @@ function endDay() {
     if (Math.random() < repayChance) {
       e.result = 'repaid';
       state.money += e.amount;
-      changeReputation(2);
+      countGoodVisit();
       if (e.regularId) addFavor(e.regularId, +1);
       others.push({ label: `💵 ${e.whoName} 来还赊账`, amount: e.amount });
     } else {
@@ -476,25 +999,7 @@ function endDay() {
   }
 
   // 4) 戳戳乐日结
-  const pk = state.poke;
-  if (pk.active && pk.holesLeft > 0) {
-    let pokes = POKE.basePokes + (!pk.grandTaken ? POKE.grandTraffic : 0) + (state.rep >= 60 ? 1 : 0);
-    pokes = Math.min(pokes, pk.holesLeft);
-    let grandHit = false;
-    for (let i = 0; i < pokes; i++) {
-      if (!pk.grandTaken && pk.holesOpened + i === pk.grandPos) grandHit = true;
-    }
-    pk.holesOpened += pokes; pk.holesLeft -= pokes;
-    const net = pokes * (POKE.price - POKE.smallPrizeCost);
-    state.money += net;
-    others.push({ label: `🎯 戳戳乐被戳了 ${pokes} 个洞`, amount: net });
-    if (grandHit) {
-      pk.grandTaken = true;
-      addLog(`🎉 戳戳乐大奖 ${itemById(pk.grandId).name} 被戳走了！围观的人都沸腾了。`);
-      others.push({ label: `🎉 大奖 ${itemById(pk.grandId).name} 被戳中（成本已在进货时付过）`, amount: 0 });
-    }
-    if (pk.holesLeft <= 0) { pk.active = false; addLog('戳戳乐板子戳完了，该重新进货了。'); }
-  }
+  settlePoke(others);
 
   // 5) 集贴纸日结
   const st = state.sticker;
@@ -538,6 +1043,11 @@ function endDay() {
   for (const { label, amount } of others) {
     addLog(`${label}${amount ? `（${amount > 0 ? '+' : '−'}¥${Math.abs(amount)}）` : ''}`);
   }
+  state.progress.days++;
+  if (state.grill.slots.length) {
+    addLog('收摊关机，清掉烤肠机上剩下的热食。');
+    state.grill.slots = [];
+  }
   state.settlement = {
     dayList: state.daySales, dayTotal, autoList, autoTotal, others, otherTotal,
     daytimeSpend: dayTotal + state.openingMoney - cashBeforeClosing,
@@ -553,9 +1063,10 @@ function nextDay() {
   $('#modal-mask').classList.add('hidden');
   if (state.day === 1) state.guide = false;
   state.day++;
-  startDay();
+  prepareDay();
   renderAll(); save();
-  if (SHOP_EVENTS[state.day] || state.day % CONFIG.rentCycle === 0) openNeighborhood();
+  if (state.day % CONFIG.rentCycle === 0) openNeighborhood('mentor');
+  $('#btn-openday').focus();
 }
 
 /* ============================================================
@@ -568,8 +1079,6 @@ function renderAll() {
   renderVisitor();
   renderWindow();
   renderTabs();
-  $('#counter-stock').innerHTML = [...new Set(state.shelf.map(stock => stock.itemId))]
-    .slice(0, 6).map(itemArtwork).join('');
   renderLog();
 }
 
@@ -583,15 +1092,16 @@ function renderGuide() {
   const guest = state.current;
   const hasOrdered = state.wholesaleOrders.length > 0;
   let text;
-  if (state.settlement) text = '看完今天的流水，点「明天开店」进入下一天。';
-  else if (guest && guest.type === 'buyer') text = '点窗前的买家，看看他想买什么。';
+  if (state.settlement) text = '看完今天的流水，点「进入明天」。';
+  else if (!state.shopOpen) text = '可以先点「进货」备货，准备好后点「开店」。';
+  else if (guest && guest.type === 'buyer') text = '点窗前的顾客，按他的需求准备商品并开小票。';
   else if (!hasOrdered && (state.shelf.length || !guest) && state.money >= WHOLESALE[0].cost * WHOLESALE[0].pack) {
     text = '试试从供货商补货。点窗台的「进货」，订一批干脆面。';
   } else if (guest) text = '点窗前的顾客，看看他带来了什么。';
   else text = '顾客接待完了，点「收摊结算」看看今天的流水。';
   $('#guide-text').textContent = text;
   tradeGuide.textContent = !guest ? ''
-    : guest.type === 'buyer' ? '看清买家的报价，再决定成交、抬价还是不卖。'
+    : guest.type === 'buyer' ? '小票可以添减商品和改价。合计要在顾客预算内。'
     : !guest.checksUsed ? '先点一个部位验货。每件货最多检查三次。'
     : '看完线索后报一个起价。卖家若嫌低，你还可以再报一次。';
 }
@@ -609,13 +1119,13 @@ function enterShop(showGuide) {
   $('#title-screen').close();
   renderAll();
   save();
-  if (firstOpening) openNeighborhood();
+  if (firstOpening || !state.neighborSeen.mentor) showNewNeighbor();
 }
 
 function itemArtwork(id) {
   const art = ITEM_ART[id];
   if (id === 'youxiji') return '<span class="item-art item-art-handheld" aria-hidden="true"></span>';
-  if (!art) return '';
+  if (!art) return GRILL.foods.find(food => food.id === id)?.emoji || '';
   return `<span class="item-art item-sheet-${art.sheet}" style="--item-x:${art.col * 100 / 3}%;--item-y:${art.row * 100 / 3}%" aria-hidden="true"></span>`;
 }
 
@@ -634,6 +1144,7 @@ function viewItem(id, uid, wholesale = false) {
   $('#item-viewer-name').textContent = item.name;
   $('#item-viewer-description').textContent = stock
     ? CONDITION[stockCondition(stock)].name + ' · ' + (stock.variant === 'fake' ? (stock.relabelled ? '标为真品，实际是赝品 · ' : '赝品 · ') : '') + '成本 ¥' + stock.cost + ' · 标价 ¥' + retailPrice(stock)
+    : GRILL.foods.includes(item) ? '烤肠机热食，随火候变化。'
     : item.pack ? '每批 ' + item.pack + ' 件 · 今日单件进价 ¥' + wholesaleQuote(item).cost : item.flavor;
   const life = stock && FOOD_LIFE[id];
   $('#item-viewer-dates').textContent = !stock ? '' : !stock.stockedDay
@@ -650,8 +1161,25 @@ function viewItem(id, uid, wholesale = false) {
 }
 
 function viewStock(uid) {
-  const stock = state.shelf.find(entry => entry.uid === uid);
+  const stock = counterInventory().find(entry => entry.uid === uid);
   if (stock) viewItem(stock.itemId, uid);
+}
+
+function renderShopClock() {
+  const remaining = state.queue.length + Number(!!state.current);
+  const total = state.visitsToday + remaining;
+  const served = state.settlement ? 1 : !state.shopOpen ? 0 : remaining ? state.visitsToday / total : 1;
+  state.clockServed = Math.max(state.clockServed, served);
+  const schedule = CONFIG.openingHours;
+  const index = schedule.findIndex(point => point.served > state.clockServed);
+  const earlier = index < 0 ? schedule[schedule.length - 1] : schedule[index - 1];
+  const later = index < 0 ? earlier : schedule[index];
+  const fraction = index < 0 ? 0 : (state.clockServed - earlier.served) / (later.served - earlier.served);
+  const minutes = Math.round((earlier.hour + (later.hour - earlier.hour) * fraction) * 60);
+  const time = String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
+  $('#shop-clock').textContent = time;
+  $('#shop-clock').setAttribute('datetime', time);
+  $('.street').dataset.light = earlier.light;
 }
 
 function renderWindow() {
@@ -667,26 +1195,67 @@ function renderWindow() {
   $('#guest-label').textContent = guest
     ? guest.name + (guest.type === 'seller' ? ' · 来卖货' : ' · 来买货') + (tradeOpen ? '　收起交易' : '　接待')
     : '';
-  $('#street-status').textContent = guest
-    ? '还有 ' + state.queue.length + ' 位顾客在路上'
-    : state.settlement ? '今天已打烊' : '顾客已接待完，可以收摊了';
-  $('#open-shelf').setAttribute('aria-label', '打开货架，共 ' + state.shelf.length + ' 件商品');
+  renderShopClock();
+  $('#btn-openday').classList.toggle('hidden', state.shopOpen || !!state.settlement);
+  $('#btn-endday').classList.toggle('hidden', !state.shopOpen && !state.settlement);
+  $('#street-status strong').textContent = guest ? '营业中' : state.settlement ? '已打烊' : state.shopOpen ? '可收摊' : '待开店';
+  $('#street-status small').textContent = guest
+    ? '等候 ' + state.queue.length + ' 位'
+    : state.settlement ? '明天见' : state.shopOpen ? '等候 0 位' : '可先备货';
+  renderCounterSlots();
+  $('#open-poke').classList.toggle('hidden', !serviceAvailable('poke'));
+  $('#open-grill').classList.toggle('hidden', !state.grill.owned);
+  $('#counter-poke-holes').innerHTML = Array.from({ length: POKE.holes }, (_, index) =>
+    `<i class="${state.poke.opened?.includes(index) ? 'open' : ''}"></i>`).join('');
 }
 
-function toggleDisplay(uid) {
-  const entry = state.shelf.find(item => item.uid === uid);
-  if (!entry || state.settlement) return;
-  entry.displayed = entry.displayed === false;
-  renderWindow();
-  renderTabs();
+function displayProductIds() {
+  return [...new Set(state.shelf.filter(retailAvailable).map(stock => stock.itemId))];
+}
+
+function renderCounterSlots() {
+  const products = displayProductIds();
+  const unassigned = products.filter(id => !state.displaySlots.includes(id));
+  $('#counter-stock').innerHTML = Array.from({ length: CONFIG.counterSlots }, (_, index) => {
+    const selected = state.displaySlots[index];
+    const id = selected == null ? unassigned.shift() : selected;
+    const item = products.includes(id) ? itemById(id) : null;
+    return `<button type="button" id="display-slot-${index}" class="display-slot" aria-haspopup="dialog"
+      onclick="openDisplaySlot(${index})" aria-label="第 ${index + 1} 格，${item ? item.name : '空位'}"
+      title="${item ? item.name : '摆放商品'}">${item ? itemArtwork(id) : '<span aria-hidden="true">+</span>'}</button>`;
+  }).join('');
+}
+
+function openDisplaySlot(index) {
+  const picker = $('#display-picker');
+  const products = displayProductIds().filter(id =>
+    !state.displaySlots.some((selected, slot) => selected === id && slot !== index));
+  const select = $('#display-product');
+  picker.dataset.slot = index;
+  $('#display-picker-title').textContent = '货架 · 第 ' + (index + 1) + ' 格';
+  select.innerHTML = '<option value="auto">自动陈列</option><option value="">留空</option>' +
+    products.map(id => `<option value="${id}">${itemById(id).name}</option>`).join('');
+  const selected = state.displaySlots[index];
+  select.value = selected == null ? 'auto' : products.includes(selected) ? selected : '';
+  picker.showModal();
+}
+
+function placeDisplayProduct() {
+  const picker = $('#display-picker');
+  const index = Number(picker.dataset.slot);
+  const selected = $('#display-product').value;
+  state.displaySlots[index] = selected === 'auto' ? null : selected;
+  picker.close();
+  renderCounterSlots();
   save();
-  $('#display-' + uid).focus();
+  $('#display-slot-' + index).focus();
 }
 
 function renderTop() {
   $('#stat-day').textContent = `第 ${state.day} 天`;
   $('#stat-money').textContent = `💰 ¥${state.money}`;
-  $('#stat-rep').textContent = `😊 口碑 ${state.rep}`;
+  $('#stat-rep').textContent = `口碑 ${state.rep}`;
+  $('#stat-rep').title = '累计 ' + state.repVisits + ' / ' + CONFIG.reputation.visitsPerPoint + ' 次满意接待';
   $('#stat-goal').textContent = state.won ? '🎯 已盘下店面！' : `🎯 盘下店面 ¥${state.money} / ¥${CONFIG.goalMoney}`;
   $('#win-banner').classList.toggle('hidden', !(state.won && !state.winSeen));
 }
@@ -707,9 +1276,9 @@ function renderVisitor() {
 function renderDialogue(guest, role, lines) {
   const frame = $('#portrait-frame');
   const identity = guest.portraitName || guest.name;
-  const column = PORTRAITS[identity];
-  frame.dataset.portrait = identity === '快递小哥' ? 'courier' : Number.isInteger(column) ? String(column) : 'fallback';
-  frame.textContent = Number.isInteger(column) ? '' : guest.avatar;
+  const portrait = identity === '快递小哥' ? 'courier' : PORTRAITS[identity];
+  frame.dataset.portrait = portrait == null ? 'fallback' : String(portrait);
+  frame.textContent = portrait == null ? guest.avatar : '';
   $('#trade-dialogue').innerHTML = `<header><strong>${esc(guest.name)}</strong><span>${role}</span></header>
     ${lines.map(line => '<p>' + esc(line) + '</p>').join('')}`;
 }
@@ -760,11 +1329,6 @@ function inspectionClue(guest, item, index) {
   return `<div class="clue"><b>${check[0]}：</b>${esc(text)}</div>`;
 }
 
-function setTradePage(page) {
-  tradePage = page;
-  renderVisitor();
-}
-
 function renderSeller(c, area, act) {
   const item = itemById(c.itemId);
   renderDialogue(c, c.regularId ? '熟客 · 卖家' : '卖家', c.lastWords ? [c.lastWords] : [c.line, pickCachedPitch(c)]);
@@ -772,7 +1336,7 @@ function renderSeller(c, area, act) {
   const draft = tradeOpen ? $('#bidInput')?.value : '';
   const minimum = c.openingBid ? c.openingBid + 1 : 1;
   const prices = c.openingBid
-    ? [minimum, Math.round((c.openingBid + c.ask) / 2), c.ask]
+    ? []
     : [Math.max(1, Math.round(c.ask * .55)), Math.max(1, Math.round(c.ask * .75)), c.ask];
   const shortcuts = [...new Set(prices.map(price => Math.max(minimum, price)))].map(price =>
     `<button type="button" class="btn small" onclick="$('#bidInput').value = ${price}; $('#bidInput').focus()">¥${price}</button>`).join('');
@@ -785,8 +1349,8 @@ function renderSeller(c, area, act) {
     </section>
     <form class="trade-group seller-bid" onsubmit="event.preventDefault(); customBid()">
       <h3>卖家要价 ¥${c.ask}</h3>
-      <p>${c.openingBid ? `起价 ¥${c.openingBid} 未成交。最后一口价 ¥${minimum}–${c.ask}。` : '先报你愿意出的最低价。卖家接受就成交。'}</p>
-      <div class="trade-actions" aria-label="快捷填价">${shortcuts}</div>
+      <p>${c.openingBid ? `起价 ¥${c.openingBid} 没谈成。请自己判断最后要出多少。` : '先报你愿意出的最低价。卖家接受就成交。'}</p>
+      ${shortcuts ? `<div class="trade-actions" aria-label="快捷填价">${shortcuts}</div>` : ''}
       <div class="trade-actions">
         <label for="bidInput">${c.openingBid ? '最后报价' : '起价'}（元）</label>
         <input id="bidInput" class="bid-input" type="number" inputmode="numeric" min="${minimum}" max="${c.ask}" step="1" required>
@@ -808,49 +1372,69 @@ function customBid() {
   resolveBid(Number($('#bidInput').value));
 }
 
-function renderBuyer(c, area, act) {
-  const t = buyerTarget();
-  const item = t ? itemById(t.itemId) : null;
-  const role = c.regularId ? '熟客 · 买家' : '散客 · 买家';
-  renderDialogue(c, role, [c.lastWords || c.line]);
-  area.innerHTML = `<div class="trade-brief">
-    <span class="trade-intent">想买 · ${c.wanted}</span>
-    ${item ? `<button type="button" class="item-preview" onclick="viewStock(${t.uid})" aria-label="查看${item.name}">${itemArtwork(item.id)}</button>
-      <strong>${item.name}</strong>${conditionBadge(t)}${t.relabelled ? '<span class="pill real">真品标签</span>' : ''}` : '<strong>还没选商品</strong>'}
-    <dl><dt>预算</dt><dd>¥${c.cap}</dd><dt>耐心</dt><dd>${c.patience}</dd></dl>
+function renderBuyer(guest, area, act) {
+  area.innerHTML = '';
+  const lines = receiptLines(guest);
+  const reserved = new Set(guest.receipt.map(row => row.uid));
+  const available = uniqueStock(counterInventory().filter(stock => retailAvailable(stock) && !reserved.has(stock.uid)));
+  const clearance = available.filter(stock => serviceAvailable('clearance') && stockCondition(stock) === 'near');
+  const grilled = available.filter(stock => stock.grilled);
+  const regular = available.filter(stock => !stock.grilled && !clearance.includes(stock));
+  act.innerHTML = `<div class="checkout">
+    <div class="checkout-stock">
+      <p class="buyer-request">${guest.line}</p>
+      <p id="buyer-reply" class="buyer-request hidden"></p>
+      ${guest.selfPick
+        ? canRecommend(guest) ? renderBuyerOptions('推荐加购', available, guest) : ''
+        : renderBuyerOptions('货架', regular, guest) +
+          (clearance.length ? renderBuyerOptions('临期促销区', clearance, guest) : '') +
+          (grilled.length ? renderBuyerOptions('现烤热食', grilled, guest) : '')}
+      <button type="button" class="btn small" onclick="buyerRefuse()">结束接待</button>
+    </div>
+    <form class="receipt" onsubmit="event.preventDefault(); settleBuyerSale()">
+      <header><strong>购物小票</strong><small>第 ${state.day} 天 · ${guest.selfPick ? '顾客自选' : '店主配货'}</small></header>
+      ${lines.map(renderReceiptLine).join('') || '<p class="receipt-empty">小票里没有商品</p>'}
+      <div class="receipt-totals"><span>合计</span><strong id="receipt-total"></strong>
+        <small id="receipt-savings"></small><small id="receipt-budget"></small></div>
+      <div class="trade-actions">
+        <button class="btn gold" ${lines.length ? '' : 'disabled'}>确认结账</button>
+        <button id="receipt-discount" type="button" class="btn receipt-discount" aria-pressed="${!!guest.discounted}" onclick="toggleReceiptDiscount()">${guest.discounted ? '取消九折' : '整单 −10%'}</button>
+        ${guest.creditAsk && lines.length ? '<button class="btn" type="submit" formaction="#" onclick="event.preventDefault(); if (this.form.reportValidity()) settleBuyerSale(true)">记赊账</button>' : ''}
+      </div>
+    </form>
   </div>`;
+  updateReceipt(guest);
+}
 
-  const favor = c.regularId ? getRegular(c.regularId).favor : 0;
-  const mayPitch = !c.pitched && (state.rep >= 35 || favor >= 3);
-  const matches = uniqueStock(state.shelf.filter(stock => stock.displayed !== false && itemCategory(itemById(stock.itemId)) === c.wanted));
-  const alternatives = mayPitch ? uniqueStock(state.shelf.filter(stock => stock.displayed !== false && itemCategory(itemById(stock.itemId)) !== c.wanted && stock.uid !== c.targetUid)) : [];
-  const options = [...matches, ...alternatives].map(stock => {
+function renderBuyerOptions(title, stocks, guest) {
+  const action = guest.selfPick ? '推荐' : '添加';
+  const tiles = stocks.map(stock => {
     const product = itemById(stock.itemId);
-    const pitch = !matches.includes(stock);
-    return `<button type="button" class="stock-tile" onclick="selectBuyerStock(${stock.uid},${pitch})"
-      aria-pressed="${stock.uid === c.targetUid}">${itemArtwork(product.id)}<span>${product.name}</span>
-      <small>${pitch ? '推销 · ' : ''}¥${retailPrice(stock)}</small></button>`;
+    const wanted = stock.itemId === guest.wantedItem;
+    const handler = guest.selfPick ? `recommendStock(${stock.uid})` : `editReceipt(${stock.uid},'add')`;
+    return `<button type="button" class="stock-tile" onclick="${handler}" aria-label="${action}${product.name}，${(stock.grilled ? grillStage(stock) : CONDITION[stockCondition(stock)]).name}，¥${counterPrice(stock)}">
+      ${itemArtwork(product.id)}<span>${product.name}${wanted ? ' · 点名' : ''}</span>
+      ${conditionBadge(stock)}<small>+ ¥${counterPrice(stock)}</small></button>`;
   }).join('');
-  const choices = options ? '<div class="buyer-options">' + options + '</div>' : '<p>货架上没有符合需求的商品。</p>';
-  const discountPrice = Math.max(1, Math.floor(c.offer * .85));
-  act.innerHTML = `<div class="trade-pages" role="group" aria-label="交易步骤">
-    <button class="btn small" onclick="setTradePage('inspect')" aria-pressed="${tradePage === 'inspect'}">选商品</button>
-    <button class="btn small" onclick="setTradePage('quote')" aria-pressed="${tradePage === 'quote'}">报价</button>
-  </div>
-  ${tradePage === 'inspect' ? choices : t ? `<div class="trade-actions">
-    <button class="btn primary" onclick="buyerAccept()">成交 ¥${c.offer}</button>
-    <button class="btn gold" onclick="buyerDeal('discount')">打折 ¥${discountPrice}</button>
-    ${c.offer > c.cap ? `<button class="btn" onclick="buyerDeal('gift')">赠予差价 ¥${c.offer - c.cap}</button>` : ''}
-    ${c.creditAsk && serviceAvailable('ledger') ? '<button class="btn" onclick="buyerCredit()">赊账</button>' : ''}
-    <button class="btn" onclick="buyerRaise()">加价 15%</button>
-  </div>` : '<p>先为顾客选一件商品。</p>'}
-  <button class="btn small" onclick="buyerRefuse()">结束接待</button>`;
+  return `<section class="checkout-options"><h3>${title}</h3>${tiles ? '<div class="buyer-options">' + tiles + '</div>' : '<p>暂无可添加的商品</p>'}</section>`;
+}
+
+function renderReceiptLine({ row, stock, item }) {
+  const canRelabel = !stock.grilled && (stock.variant === 'fake' || stockCondition(stock) !== betterLabel(stock));
+  const label = stock.grilled ? grillStage(stock).name : CONDITION[row.upgraded ? betterLabel(stock) : stockCondition(stock)].name;
+  return `<div class="receipt-line">
+    <div><strong>${item.name}</strong><small>${label}${row.upgraded ? ' · 已改签' : ''}</small></div>
+    <label>¥ <input type="number" min="0" max="${CONFIG.retail.maxUnitPrice}" step="1" required
+      inputmode="numeric" value="${row.price}" aria-label="${item.name}单价" oninput="editReceiptPrice(${row.uid},this)"></label>
+    <button type="button" class="receipt-remove" onclick="editReceipt(${row.uid},'remove')" aria-label="移除${item.name}">×</button>
+    ${canRelabel ? `<button type="button" class="receipt-label" onclick="editReceipt(${row.uid},'label')">${row.upgraded ? '恢复原签' : '悄悄改成' + CONDITION[betterLabel(stock)].name}</button>` : ''}
+  </div>`;
 }
 
 function renderTabs() {
-  if (!serviceAvailable(currentTab)) currentTab = 'shelf';
+  if (!serviceAvailable(currentTab) || currentTab === 'grill' && !state.grill.owned) currentTab = 'shelf';
   document.querySelectorAll('#tabs .tab').forEach(b => {
-    b.classList.toggle('hidden', !serviceAvailable(b.dataset.tab));
+    b.classList.toggle('hidden', !serviceAvailable(b.dataset.tab) || b.dataset.tab === 'grill' && !state.grill.owned);
     b.classList.toggle('active', b.dataset.tab === currentTab);
   });
   const page = $('#tab-pages');
@@ -859,12 +1443,13 @@ function renderTabs() {
   else if (currentTab === 'poke') page.innerHTML = tabPoke();
   else if (currentTab === 'sticker') page.innerHTML = tabSticker();
   else if (currentTab === 'ledger') page.innerHTML = tabLedger();
+  else if (currentTab === 'grill') page.innerHTML = tabGrill();
   else if (currentTab === 'collection') page.innerHTML = tabCollection();
   else page.innerHTML = tabRegulars();
 }
 
 function tabWholesale() {
-  const products = WHOLESALE.filter(product => state.day >= (product.unlockDay || 1)).map(product => {
+  const products = WHOLESALE.filter(product => serviceAvailable(product.unlock)).map(product => {
     const { cost, soldOut } = wholesaleQuote(product);
     const total = cost * product.pack;
     const change = cost > product.cost ? ' · 今日涨价' : cost < product.cost ? ' · 今日降价' : '';
@@ -878,7 +1463,13 @@ function tabWholesale() {
       <button class="btn small gold display-toggle" onclick="orderWholesale('${product.id}')" ${disabled ? 'disabled' : ''}>${label}</button>
     </div>`;
   }).join('');
-  return '<p class="mut">每种商品每天限订一批，立即到货。</p>' + products;
+  const equipment = !serviceAvailable('grill') ? '' : state.grill.owned
+    ? GRILL.foods.map(food => `<div class="card">
+      <b>${food.name}</b> · 每批 ${food.pack} 串 · 冷冻库存 ${state.grill.supplies[food.id] || 0}
+      <button class="btn small gold" onclick="orderGrillFood('${food.id}')" ${state.settlement || state.wholesaleOrders.includes(food.id) ? 'disabled' : ''}>进货 ¥${food.cost * food.pack}</button></div>`).join('')
+    : `<div class="card"><b>烤肠机</b> · ${GRILL.capacity} 个烤位
+      <button class="btn gold" onclick="buyGrill()" ${state.settlement ? 'disabled' : ''}>购置 ¥${GRILL.cost}</button></div>`;
+  return '<p class="mut">每种商品每天限订一批，立即到货。</p>' + products + equipment;
 }
 
 function tabShelf() {
@@ -897,27 +1488,62 @@ function tabShelf() {
   const strategies = Object.entries(STRATEGIES).map(([key, rule]) =>
     `<button class="btn small" aria-pressed="${state.strategy === key}" onclick="setStrategy('${key}')">${rule.name}</button>`).join('');
   return `<div class="wood-shelves">${tiles || '<p>还没有商品，先去进货或收货。</p>'}</div>
-    <details class="shelf-strategy"><summary>定价策略</summary><div class="trade-actions">${strategies}</div></details>`;
+    <details class="shelf-strategy"><summary>定价策略</summary><div class="trade-actions">${strategies}</div></details>
+    ${renderMilestones()}`;
+}
+
+function renderMilestones() {
+  const rows = Object.entries(MILESTONES).map(([key, [sales, days]]) =>
+    `<li>${SERVICE_NAMES[key]} · ${serviceAvailable(key) ? '已开放' : '付现小票 ' + sales + ' 张，收摊 ' + days + ' 次'}</li>`).join('');
+  return `<details class="milestones"><summary>经营进度 · 付现小票 ${state.progress.sales} 张 / 收摊 ${state.progress.days} 次</summary><ul>${rows}</ul></details>`;
 }
 
 function tabPoke() {
   const pk = state.poke;
   if (!pk.active) {
-    const opts = POKE.grands.map((g) => {
-      const total = POKE.boardCost + g.cost;
-      return `<div class="card"><div class="row"><span>大奖：${itemPreviewButton(g.itemId)} <b>${itemById(g.itemId).name}</b></span><span>总成本 ¥${total}</span></div>
-        <button class="btn small primary" onclick="pokeStock('${g.itemId}')">进货上架</button></div>`;
+    const opts = POKE.grands.filter(pokePrizeAvailable).map(grand => {
+      const total = POKE.boardCost + grand.cost;
+      return `<div class="card"><div class="row"><span>${itemPreviewButton(grand.itemId)} <b>${itemById(grand.itemId).name}</b></span><span>整板 ¥${total}</span></div>
+        <button class="btn small gold" onclick="pokeStock('${grand.itemId}')" ${state.settlement ? 'disabled' : ''}>挂上新板</button></div>`;
     }).join('');
-    return `<div class="card">🎯 戳戳乐：一板 ${POKE.holes} 个洞，进货 ¥${POKE.boardCost}，顾客 ¥${POKE.price}/洞来戳。大奖摆在明面上能拉客流，被戳中就归人家了。</div>${opts}`;
+    return `<p>一板 ${POKE.holes} 个洞，顾客每开一洞付 ¥${POKE.price}。</p>${opts}`;
   }
-  let holes = '';
-  for (let i = 0; i < POKE.holes; i++) {
-    const opened = i < pk.holesOpened;
-    const isGrand = i === pk.grandPos;
-    holes += `<div class="hole ${opened ? 'open' : ''} ${isGrand && !pk.grandTaken ? 'grand' : ''}">${opened ? (isGrand && pk.grandTaken ? '🏆' : '·') : '?'}</div>`;
-  }
-  return `<div class="card">🎯 营业中：剩余 ${pk.holesLeft} 个洞｜大奖 ${itemPreviewButton(pk.grandId)} ${itemById(pk.grandId).name} ${pk.grandTaken ? '已被戳走 😭' : '还在板上 ✨（拉客流中）'}</div>
-    <div class="poke-grid">${holes}</div><div class="mut" style="margin-top:8px;">每天收摊时自动结算戳洞收入，大奖位置只有你自己看得见。</div>`;
+  const demand = pokeDemand();
+  const holes = Array.from({ length: POKE.holes }, (_, index) => {
+    const opened = pk.opened.includes(index);
+    const prize = index === pk.grandPos;
+    return `<button type="button" id="poke-hole-${index}" class="poke-hole${opened ? ' open' : ''}"
+      ${opened || !demand || state.settlement ? 'disabled' : ''} onclick="pokeAtCounter(${index})"
+      aria-label="第 ${index + 1} 洞${opened ? prize ? '，已开出大奖' : '，已开' : ''}">${opened ? prize ? '★' : '·' : '?'}</button>`;
+  }).join('');
+  return `<div class="poke-board">
+    <div class="row"><b>戳戳乐</b><span>剩 ${pk.holesLeft} 洞 · 今天还可戳 ${state.settlement ? 0 : demand} 洞</span></div>
+    <div class="poke-grid">${holes}</div>
+    <p>大奖 ${itemById(pk.grandId).name} · ${pk.grandTaken ? '已开出' : '还在板上'}</p>
+    <small>剩余客流在收摊时自动开洞，收入一并入账。</small>
+  </div>`;
+}
+
+function tabGrill() {
+  const cooking = state.grill.slots.map(stock => {
+    const food = itemById(stock.itemId);
+    const stage = grillStage(stock);
+    return `<article class="grill-slot" data-stage="${stage.key}">
+      <span class="grill-food-icon" aria-hidden="true">${food.emoji}</span>
+      <strong>${food.name}</strong><small>${stage.name}</small>
+      <button type="button" class="btn small" onclick="discardGrillFood(${stock.uid})" ${state.settlement ? 'disabled' : ''}>撤下</button>
+    </article>`;
+  }).join('');
+  const empty = '<div class="grill-slot"><span>空烤位</span></div>'.repeat(GRILL.capacity - state.grill.slots.length);
+  const controls = GRILL.foods.map(food => {
+    const amount = state.grill.supplies[food.id] || 0;
+    return `<button class="btn small gold" onclick="placeGrillFood('${food.id}')" ${!amount || state.grill.slots.length >= GRILL.capacity || state.settlement ? 'disabled' : ''}>放上${food.name} · 冷冻库存 ${amount}</button>`;
+  }).join('');
+  return `<section class="grill-panel">
+    <p>送走一位顾客，火候才推进一次。熟了或开花时可以在小票添加，未熟可能被顾客拒绝。</p>
+    <div class="grill-rack">${cooking}${empty}</div>
+    <div class="trade-actions">${controls}<button class="btn small" onclick="openManagement('wholesale')">向供货商补货</button></div>
+  </section>`;
 }
 
 function tabSticker() {
@@ -978,7 +1604,7 @@ function showSettlement(s) {
     <b>🧾 其他收支（小计 ${s.otherTotal >= 0 ? '+' : ''}¥${s.otherTotal}）</b><table>${others}</table>
     <p>白天进货支出 ¥${s.daytimeSpend}</p>
     <p style="font-size:16px;">今日净变化：<b class="${s.net >= 0 ? 'plus' : 'minus'}">${s.net >= 0 ? '+' : ''}¥${s.net}</b>｜当前资金 <b>¥${state.money}</b>｜口碑 ${state.rep}</p>
-    <button class="btn primary" onclick="nextDay()" style="margin-top:10px;">☀️ 明天开店</button>`;
+    <button class="btn primary" onclick="nextDay()" style="margin-top:10px;">☀️ 进入明天</button>`;
   $('#modal-mask').classList.remove('hidden');
 }
 
@@ -988,12 +1614,13 @@ function resetGame() {
   localStorage.removeItem(CONFIG.saveKey);
   state = newState();
   addLog('新店开业！口袋里有 ¥250，目标是攒够 ¥3000 盘下店面。');
-  startDay();
+  prepareDay();
   renderAll(); save();
 }
 
 document.querySelectorAll('#tabs .tab').forEach((b) =>
   b.addEventListener('click', () => { currentTab = b.dataset.tab; renderTabs(); }));
+$('#btn-openday').addEventListener('click', startDay);
 $('#btn-endday').addEventListener('click', endDay);
 $('#guest-call').addEventListener('click', () => {
   if (!state.current || state.settlement) return;
@@ -1009,14 +1636,16 @@ function openManagement(tab) {
   $('#side').scrollIntoView({ block: 'start' });
 }
 
-$('#open-shelf').addEventListener('click', () => openManagement('shelf'));
-$('#viewer-label').addEventListener('click', () => changeLabel(viewedShelfUid));
-$('#shop-npc').addEventListener('click', openNeighborhood);
-$('#close-neighborhood').addEventListener('click', () => $('#neighborhood').close());
-$('#promote-shop').addEventListener('click', () => {
-  $('#neighborhood').close();
-  recruitShoppers();
+$('#display-picker form').addEventListener('submit', event => {
+  if (event.submitter?.value === 'cancel') return;
+  event.preventDefault();
+  placeDisplayProduct();
 });
+$('#viewer-label').addEventListener('click', () => changeLabel(viewedShelfUid));
+$('#shop-npc').addEventListener('click', () => openNeighborhood('mentor'));
+$('#shop-organizer').addEventListener('click', () => openNeighborhood('organizer'));
+$('#close-neighborhood').addEventListener('click', closeNeighborhood);
+$('#promote-shop').addEventListener('click', recruitShoppers);
 $('#music-toggle').addEventListener('click', toggleMusic);
 $('#music-volume').addEventListener('input', setMusicVolume);
 $('#event-dialog').addEventListener('close', () => $(state.current ? '#guest-call' : '#btn-endday').focus());
@@ -1034,6 +1663,8 @@ $('#viewer-shelf').addEventListener('click', () => {
 $('#open-log').addEventListener('click', () => $('#log-book').showModal());
 $('#close-log').addEventListener('click', () => $('#log-book').close());
 $('#open-wholesale').addEventListener('click', () => openManagement('wholesale'));
+$('#open-poke').addEventListener('click', () => openManagement('poke'));
+$('#open-grill').addEventListener('click', () => openManagement('grill'));
 $('#btn-reset').addEventListener('click', () => {
   resetGame();
   openTitle();
@@ -1053,7 +1684,11 @@ state = load();
 if (!state) {
   state = newState();
   addLog('新店开业！口袋里有 ¥250，目标是攒够 ¥3000 盘下店面。');
-  startDay();
+  prepareDay();
+}
+if (state.shopOpen && !state.settlement && (!state.current && state.queue.length || state.current?.type === 'buyer' && !state.current.receipt)) {
+  if (state.current?.type === 'buyer') state.queue.unshift({ type: 'buyer' });
+  nextVisitor();
 }
 renderAll();
 if (state.settlement) showSettlement(state.settlement);

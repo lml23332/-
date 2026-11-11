@@ -8,6 +8,23 @@
 <link rel="stylesheet" href="css/window.css">
 </head>
 <body>
+  <!-- 只在缩略图渲染时滤除图集底色，验货大图仍使用原图。 -->
+  <svg class="art-filters" width="0" height="0" aria-hidden="true">
+    <defs>
+      <filter id="item-key" color-interpolation-filters="sRGB">
+        <feFlood flood-color="#122923"/>
+        <feBlend in="SourceGraphic" mode="difference"/>
+        <feColorMatrix result="mask" type="matrix" values="0 0 0 0 0   0 0 0 0 0   0 0 0 0 0   6 6 6 0 -.2"/>
+        <feComposite in="SourceGraphic" in2="mask" operator="in"/>
+      </filter>
+      <filter id="handheld-key" color-interpolation-filters="sRGB">
+        <feFlood flood-color="#172e27"/>
+        <feBlend in="SourceGraphic" mode="difference"/>
+        <feColorMatrix result="mask" type="matrix" values="0 0 0 0 0   0 0 0 0 0   0 0 0 0 0   6 6 6 0 -.2"/>
+        <feComposite in="SourceGraphic" in2="mask" operator="in"/>
+      </filter>
+    </defs>
+  </svg>
   <dialog id="title-screen" aria-labelledby="game-title">
     <div class="title-card">
       <h1 id="game-title">校门口小卖部</h1>
@@ -34,7 +51,8 @@
       <span class="stat goal" id="stat-goal">🎯 盘下店面 ¥250 / ¥3000</span>
     </div>
     <div class="top-actions">
-      <button id="btn-endday" class="btn primary">🌙 收摊结算</button>
+      <button id="btn-openday" class="btn gold">开店</button>
+      <button id="btn-endday" class="btn primary hidden">🌙 收摊结算</button>
       <button id="music-toggle" class="btn" aria-label="背景音乐" aria-pressed="false">音乐</button><label class="volume-control">音量 <input id="music-volume" type="range" min="0" max="100" value="70"></label><button id="open-title" class="btn">主菜单</button>
     </div>
   </header>
@@ -50,26 +68,57 @@
   </section>
   <main>
     <section class="shop" aria-label="小卖部售货窗口">
-      <div class="street">
+      <div class="street" data-light="morning">
         <div class="walkers" aria-hidden="true">
-          <span class="walker"><i class="person"></i></span>
-          <span class="walker walker-second"><i class="person"></i></span>
+          <span class="walker"><i class="person"><i class="walker-leg"></i><i class="walker-leg back"></i></i></span>
+          <span class="walker walker-second"><i class="person"><i class="walker-leg"></i><i class="walker-leg back"></i></i></span>
         </div>
         <button type="button" id="guest-call" class="guest-call hidden" aria-controls="counter trade-dialogue" aria-expanded="false">
           <span id="portrait-frame" class="portrait-frame" aria-hidden="true"></span>
           <span id="guest-label"></span>
         </button>
         <div id="trade-dialogue" class="trade-dialogue hidden" aria-live="polite"></div>
-        <button id="shop-npc" type="button" class="btn small shop-npc"></button>
-        <p id="street-status" class="street-status" role="status"></p>
+        <div class="neighbor-dock">
+          <button id="shop-npc" type="button" class="shop-npc" data-npc="mentor" aria-controls="neighborhood" aria-expanded="false">
+            <span class="neighbor-avatar" aria-hidden="true"></span><strong>邻居林姨</strong>
+          </button>
+          <button id="shop-organizer" type="button" class="shop-npc hidden" data-npc="organizer" aria-controls="neighborhood" aria-expanded="false">
+            <span class="neighbor-avatar" aria-hidden="true"></span><strong>社区小梁</strong>
+          </button>
+        </div>
+        <aside id="neighborhood" class="neighbor-talk hidden" aria-labelledby="neighborhood-name">
+          <div id="neighborhood-portrait" aria-hidden="true"></div>
+          <div>
+            <h2 id="neighborhood-name"></h2>
+            <p id="neighborhood-line"></p>
+            <div class="trade-actions">
+              <button id="promote-shop" type="button" class="btn gold"></button>
+              <button id="close-neighborhood" type="button" class="btn">收起对话</button>
+            </div>
+          </div>
+        </aside>
+        <div id="street-status" class="street-status" role="status">
+          <time id="shop-clock" datetime="08:00">08:00</time><span><strong></strong><small></small></span>
+        </div>
+        <section class="display" aria-label="桌板陈列">
+          <div class="counter-zone shelf-zone" aria-label="货架陈列格">
+            <div id="counter-stock"></div>
+          </div>
+          <button id="open-poke" type="button" class="counter-poke hidden" aria-label="查看戳戳乐">
+            <span class="counter-pegboard" aria-hidden="true"><span id="counter-poke-holes"></span></span>
+            <span class="counter-poke-label">戳戳乐</span>
+          </button>
+          <button id="open-grill" type="button" class="counter-grill hidden" aria-label="打开烤肠机">
+            <span class="grill-rollers" aria-hidden="true"></span><span class="counter-poke-label">烤肠机</span>
+          </button>
+          <div class="counter-zone book-zone">
+            <button id="open-log" type="button" class="counter-book" aria-haspopup="dialog">流水账</button>
+          </div>
+          <div class="counter-zone supply-zone">
+            <button id="open-wholesale" type="button" class="btn small gold">进货</button>
+          </div>
+        </section>
       </div>
-      <section class="display" aria-label="窗台陈列">
-        <button id="open-shelf" type="button" class="counter-shelf" aria-label="查看货架">
-          <span id="counter-stock" aria-hidden="true"></span>
-        </button>
-        <button id="open-log" type="button" class="counter-book" aria-haspopup="dialog">流水账</button>
-        <button id="open-wholesale" type="button" class="btn small gold">进货</button>
-      </section>
       <section id="counter" class="trade-stage hidden" aria-label="柜台交易">
         <section id="visitor-area" aria-label="交易信息"></section>
         <p id="trade-guide" class="hidden"></p>
@@ -86,6 +135,7 @@
         <button data-tab="poke" class="tab">戳戳乐</button>
         <button data-tab="sticker" class="tab">集贴纸</button>
         <button data-tab="ledger" class="tab">赊账本</button>
+        <button data-tab="grill" class="tab">烤肠机</button>
         <button data-tab="collection" class="tab">图鉴</button>
         <button data-tab="regulars" class="tab">熟客</button>
       </nav>
@@ -93,12 +143,14 @@
     </details>
   </main>
 
-  <dialog id="neighborhood" aria-labelledby="neighborhood-name">
-    <div id="neighborhood-portrait" aria-hidden="true"></div>
-    <h2 id="neighborhood-name"></h2>
-    <p id="neighborhood-line"></p>
-    <button id="promote-shop" type="button" class="btn gold">请帮忙宣传 ¥18</button>
-    <button id="close-neighborhood" type="button" class="btn">返回店里</button>
+  <dialog id="display-picker" aria-labelledby="display-picker-title">
+    <form method="dialog" class="trade-actions">
+      <h2 id="display-picker-title">布置货架</h2>
+      <label for="display-product">陈列商品</label>
+      <select id="display-product"></select>
+      <button id="confirm-display" type="submit" class="btn gold">摆放</button>
+      <button type="submit" class="btn" value="cancel">取消</button>
+    </form>
   </dialog>
   <dialog id="item-viewer" aria-labelledby="item-viewer-name">
     <header class="item-viewer-header">
