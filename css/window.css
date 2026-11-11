@@ -966,6 +966,8 @@ main { grid-template-columns: minmax(0, 1fr); }
 .poke-board .row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
 .poke-board p { margin-top: 10px; }
 .poke-hole {
+  display: grid;
+  place-items: center;
   aspect-ratio: 1;
   min-width: 0;
   border: 2px solid #a65629;
@@ -975,11 +977,23 @@ main { grid-template-columns: minmax(0, 1fr); }
   color: #48291d;
   font: inherit;
   font-weight: bold;
-  cursor: pointer;
 }
-.poke-hole:not(:disabled):hover { background: #ffe2a0; }
 .poke-hole.open { background: #302119; box-shadow: inset 0 3px #191411; color: #f7c475; }
-.poke-hole:disabled { cursor: default; }
+
+#unlock-guide {
+  display: grid;
+  gap: 8px;
+  margin-block: 10px;
+  padding: 10px 14px;
+  border: 1px solid #a58350;
+  background: #253c30;
+}
+#unlock-guide summary { color: #ffdfa0; cursor: pointer; font-weight: 700; }
+#unlock-guide p { margin-top: 4px; }
+#unlock-guide .trade-actions { margin-top: 6px; }
+.settlement-total { font-size: 1.2rem; }
+.settlement-details { display: grid; gap: 6px; margin-top: 12px; }
+.settlement-details summary { cursor: pointer; }
 .milestones { margin-top: 10px; }
 .milestones summary { cursor: pointer; }
 .milestones ul { margin: 8px 0 0 20px; line-height: 1.6; }

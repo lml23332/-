@@ -44,6 +44,7 @@ function newState() {
     visitsToday: 0,
     clockServed: 0,
     guide: true,
+    seenTutorials: [],
     openingMoney: CONFIG.startMoney,
     settlement: null,
     money: CONFIG.startMoney,
@@ -122,6 +123,7 @@ function load() {
     if (typeof s.shopOpen !== 'boolean') {
       s.shopOpen = !!(s.settlement || s.current || s.queue?.length || s.wholesaleOrders?.length || s.daySales?.length);
     }
+    if (!s.seenTutorials && (s.day > 1 || s.shopOpen)) s.seenTutorials = ['opening'];
     return Object.assign(newState(), { started: true, guide: false }, s); // 用默认值兜底新字段，保证老存档可续
   } catch (e) { return null; }
 }
@@ -139,11 +141,12 @@ function changeReputation(delta) {
   return state.rep - previous;
 }
 
-function countGoodVisit() {
-  state.repVisits++;
-  if (state.repVisits < CONFIG.reputation.visitsPerPoint) return;
-  state.repVisits = 0;
-  changeReputation(1);
+function countGoodVisit(points = 1) {
+  const threshold = CONFIG.reputation.visitsPerPoint;
+  state.repVisits += points;
+  const gained = Math.floor(state.repVisits / threshold);
+  state.repVisits %= threshold;
+  if (gained) changeReputation(gained);
 }
 
 function itemCategory(item) {
@@ -450,6 +453,7 @@ function startDay() {
 }
 
 function finishVisit() {
+  if (state.current?.type === 'buyer') customerPokes();
   state.serviceTurns++;
   state.visitsToday++;
   nextVisitor();
@@ -635,6 +639,7 @@ function editReceipt(uid, action) {
   const row = guest.receipt.find(entry => entry.uid === uid);
   const stock = counterInventory().find(entry => entry.uid === uid);
   if (action === 'add' && !guest.selfPick && stock && retailAvailable(stock) && !row) {
+    if (guest.wantedItem && (!matchesBuyerRequest(guest, stock) || guest.receipt.length)) return;
     guest.receipt.push({ uid, price: counterPrice(stock) });
   } else if (action === 'remove' && row) {
     guest.receipt = guest.receipt.filter(entry => entry !== row);
@@ -698,11 +703,15 @@ function editReceiptPrice(uid, input) {
   }
 }
 
+function matchesBuyerRequest(guest, stock, upgraded = false) {
+  return stock.itemId === guest.wantedItem && (!guest.wantedCondition ||
+    (upgraded ? betterLabel(stock) : stockCondition(stock)) === guest.wantedCondition);
+}
+
 function receiptObjection(guest, lines) {
-  if (guest.wantedItem && !lines.some(({ row, stock }) =>
-    stock.itemId === guest.wantedItem && (!guest.wantedCondition ||
-      (row.upgraded ? betterLabel(stock) : stockCondition(stock)) === guest.wantedCondition))) {
-    return '我想买的是刚才点的那件，能换一下吗？';
+  if (!guest.wantedItem) return '';
+  if (lines.length !== 1 || !matchesBuyerRequest(guest, lines[0].stock, lines[0].row.upgraded)) {
+    return '我只要刚才点的那一件，能帮我改下小票吗？';
   }
   return '';
 }
@@ -756,10 +765,9 @@ function settleBuyerSale(onCredit = false) {
   const discount = total < lines.reduce((sum, { stock }) => sum + counterPrice(stock), 0);
   const fresh = lines.some(({ stock, revenue }) => revenue > 0 && stockCondition(stock) === 'fresh');
   const courtesy = quote.discount || quote.roundOff;
-  if (total > 0) countGoodVisit();
+  if (total > 0) countGoodVisit(1 + (fresh ? CONFIG.retail.freshSaleRepProgress : 0) + (courtesy ? CONFIG.retail.courtesyRepProgress : 0));
   const bonus = (courtesy ? CONFIG.retail.courtesyFavor : 0) + (fresh ? CONFIG.retail.freshSaleFavor : 0);
   if (guest.regularId) addFavor(guest.regularId, (discount ? 2 : 1) + bonus);
-  if (fresh || courtesy) changeReputation((fresh ? CONFIG.retail.freshSaleReputation : 0) + (courtesy ? CONFIG.retail.courtesyReputation : 0));
   if (courtesy) {
     finishVisit();
     notifyPlayer(guest.name + (quote.roundOff ? '：谢谢你帮我抹零！' : '：谢谢你给我打折！'));
@@ -849,19 +857,21 @@ function openPokeHole(index) {
   return true;
 }
 
-function pokeAtCounter(index) {
-  if (!openPokeHole(index)) return;
-  renderAll(); save();
-  $('.poke-hole:not(:disabled)')?.focus();
+function customerPokes() {
+  const pk = state.poke;
+  if (!pk.active || !pokeDemand()) return;
+  const unopened = Array.from({ length: POKE.holes }, (_, index) => index)
+    .filter(index => !pk.opened.includes(index));
+  return openPokeHole(pick(unopened));
 }
 
 function settlePoke(others) {
   const pk = state.poke;
   if (!pk.active) return;
-  for (let i = 0; i < POKE.holes && pokeDemand(); i++) openPokeHole(i);
+  while (customerPokes()) { /* 结算当天剩下的戳戳乐顾客 */ }
   const net = pk.dayOpened * (POKE.price - POKE.smallPrizeCost);
   state.money += net;
-  if (pk.dayOpened) others.push({ label: '戳戳乐开洞 ×' + pk.dayOpened, amount: net });
+  if (pk.dayOpened) others.push({ label: '顾客戳戳乐 ×' + pk.dayOpened, amount: net });
   if (!pk.holesLeft) {
     pk.active = false;
     addLog('戳戳乐板子戳完了，该重新进货了。');
@@ -1076,10 +1086,31 @@ function renderAll() {
   renderTop();
   renderNeighborhood();
   renderGuide();
+  renderTutorials();
   renderVisitor();
   renderWindow();
   renderTabs();
   renderLog();
+}
+
+function renderTutorials() {
+  const panel = $('#unlock-guide');
+  const pending = TUTORIALS.filter(entry => serviceAvailable(entry.unlock) && !state.seenTutorials.includes(entry.id));
+  panel.classList.toggle('hidden', !pending.length || !state.started || !!state.settlement);
+  panel.innerHTML = pending.map((lesson, index) => `<details ${index === 0 ? 'open' : ''}>
+    <summary>${lesson.title}</summary><p>${lesson.text}</p><div class="trade-actions">
+      ${lesson.tab ? `<button class="btn small gold" onclick="acknowledgeTutorial('${lesson.id}', true)">${lesson.action}</button>` : ''}
+      <button class="btn small" onclick="acknowledgeTutorial('${lesson.id}')">知道了</button>
+    </div></details>`).join('');
+}
+
+function acknowledgeTutorial(id, openTab = false) {
+  const lesson = TUTORIALS.find(entry => entry.id === id);
+  if (!lesson || !serviceAvailable(lesson.unlock)) return;
+  if (!state.seenTutorials.includes(id)) state.seenTutorials.push(id);
+  save();
+  renderTutorials();
+  if (openTab && lesson.tab) openManagement(lesson.tab);
 }
 
 function renderGuide() {
@@ -1255,7 +1286,7 @@ function renderTop() {
   $('#stat-day').textContent = `第 ${state.day} 天`;
   $('#stat-money').textContent = `💰 ¥${state.money}`;
   $('#stat-rep').textContent = `口碑 ${state.rep}`;
-  $('#stat-rep').title = '累计 ' + state.repVisits + ' / ' + CONFIG.reputation.visitsPerPoint + ' 次满意接待';
+  $('#stat-rep').title = '口碑进度 ' + state.repVisits + ' / ' + CONFIG.reputation.visitsPerPoint;
   $('#stat-goal').textContent = state.won ? '🎯 已盘下店面！' : `🎯 盘下店面 ¥${state.money} / ¥${CONFIG.goalMoney}`;
   $('#win-banner').classList.toggle('hidden', !(state.won && !state.winSeen));
 }
@@ -1376,7 +1407,9 @@ function renderBuyer(guest, area, act) {
   area.innerHTML = '';
   const lines = receiptLines(guest);
   const reserved = new Set(guest.receipt.map(row => row.uid));
-  const available = uniqueStock(counterInventory().filter(stock => retailAvailable(stock) && !reserved.has(stock.uid)));
+  const available = uniqueStock(counterInventory().filter(stock =>
+    retailAvailable(stock) && !reserved.has(stock.uid) &&
+    (!guest.wantedItem || (!guest.receipt.length && matchesBuyerRequest(guest, stock)))));
   const clearance = available.filter(stock => serviceAvailable('clearance') && stockCondition(stock) === 'near');
   const grilled = available.filter(stock => stock.grilled);
   const regular = available.filter(stock => !stock.grilled && !clearance.includes(stock));
@@ -1384,7 +1417,7 @@ function renderBuyer(guest, area, act) {
     <div class="checkout-stock">
       <p class="buyer-request">${guest.line}</p>
       <p id="buyer-reply" class="buyer-request hidden"></p>
-      ${guest.selfPick
+      ${guest.wantedItem && guest.receipt.length ? '' : guest.selfPick
         ? canRecommend(guest) ? renderBuyerOptions('推荐加购', available, guest) : ''
         : renderBuyerOptions('货架', regular, guest) +
           (clearance.length ? renderBuyerOptions('临期促销区', clearance, guest) : '') +
@@ -1495,7 +1528,10 @@ function tabShelf() {
 function renderMilestones() {
   const rows = Object.entries(MILESTONES).map(([key, [sales, days]]) =>
     `<li>${SERVICE_NAMES[key]} · ${serviceAvailable(key) ? '已开放' : '付现小票 ' + sales + ' 张，收摊 ' + days + ' 次'}</li>`).join('');
-  return `<details class="milestones"><summary>经营进度 · 付现小票 ${state.progress.sales} 张 / 收摊 ${state.progress.days} 次</summary><ul>${rows}</ul></details>`;
+  const tutorials = TUTORIALS.filter(lesson => serviceAvailable(lesson.unlock))
+    .map(lesson => `<li><strong>${lesson.title}</strong> · ${lesson.text}</li>`).join('');
+  return `<details class="milestones"><summary>经营进度 · 付现小票 ${state.progress.sales} 张 / 收摊 ${state.progress.days} 次</summary><ul>${rows}</ul></details>
+    <details class="milestones"><summary>玩法教学</summary><ul>${tutorials}</ul></details>`;
 }
 
 function tabPoke() {
@@ -1512,15 +1548,14 @@ function tabPoke() {
   const holes = Array.from({ length: POKE.holes }, (_, index) => {
     const opened = pk.opened.includes(index);
     const prize = index === pk.grandPos;
-    return `<button type="button" id="poke-hole-${index}" class="poke-hole${opened ? ' open' : ''}"
-      ${opened || !demand || state.settlement ? 'disabled' : ''} onclick="pokeAtCounter(${index})"
-      aria-label="第 ${index + 1} 洞${opened ? prize ? '，已开出大奖' : '，已开' : ''}">${opened ? prize ? '★' : '·' : '?'}</button>`;
+    return `<span role="img" class="poke-hole${opened ? ' open' : ''}"
+      aria-label="第 ${index + 1} 洞${opened ? prize ? '，已开出大奖' : '，已开' : '，未开'}">${opened ? prize ? '★' : '·' : '?'}</span>`;
   }).join('');
   return `<div class="poke-board">
-    <div class="row"><b>戳戳乐</b><span>剩 ${pk.holesLeft} 洞 · 今天还可戳 ${state.settlement ? 0 : demand} 洞</span></div>
+    <div class="row"><b>戳戳乐</b><span>剩 ${pk.holesLeft} 洞 · 今天顾客已戳 ${pk.dayOpened} 洞</span></div>
     <div class="poke-grid">${holes}</div>
     <p>大奖 ${itemById(pk.grandId).name} · ${pk.grandTaken ? '已开出' : '还在板上'}</p>
-    <small>剩余客流在收摊时自动开洞，收入一并入账。</small>
+    <small>顾客自己选洞，收入在收摊时入账。${!state.settlement && demand ? ' 今天预计还有 ' + demand + ' 位顾客来戳。' : ''}</small>
   </div>`;
 }
 
@@ -1592,19 +1627,35 @@ function renderLog() {
 
 /* ---------------- 结算弹窗 ---------------- */
 function showSettlement(s) {
-  const rows = (list) => list.length
-    ? list.map((x) => `<tr><td>${x.itemId ? itemPreviewButton(x.itemId) : ''} ${esc(x.label)}</td><td class="plus">+¥${x.revenue}</td></tr>`).join('')
-    : '<tr><td class="mut">无</td><td>¥0</td></tr>';
-  const others = s.others.length
-    ? s.others.map((x) => `<tr><td>${esc(x.label)}</td><td class="${x.amount >= 0 ? 'plus' : 'minus'}">${x.amount >= 0 ? '+' : ''}¥${x.amount}</td></tr>`).join('')
-    : '<tr><td class="mut">无</td><td>¥0</td></tr>';
-  $('#modal').innerHTML = `<h3>🌙 第 ${state.day} 天收摊结算</h3>
-    <b>☀️ 白天柜台成交（小计 +¥${s.dayTotal}）</b><table>${rows(s.dayList)}</table>
-    <b>🌙 收摊自动售卖（小计 +¥${s.autoTotal}）</b><table>${rows(s.autoList)}</table>
-    <b>🧾 其他收支（小计 ${s.otherTotal >= 0 ? '+' : ''}¥${s.otherTotal}）</b><table>${others}</table>
-    <p>白天进货支出 ¥${s.daytimeSpend}</p>
-    <p style="font-size:16px;">今日净变化：<b class="${s.net >= 0 ? 'plus' : 'minus'}">${s.net >= 0 ? '+' : ''}¥${s.net}</b>｜当前资金 <b>¥${state.money}</b>｜口碑 ${state.rep}</p>
-    <button class="btn primary" onclick="nextDay()" style="margin-top:10px;">☀️ 进入明天</button>`;
+  const amount = value => (value > 0 ? '+' : value < 0 ? '−' : '') + '¥' + Math.abs(value);
+  const row = (label, value) => `<tr><td>${esc(label)}</td><td class="${value >= 0 ? 'plus' : 'minus'}">${amount(value)}</td></tr>`;
+  const sales = list => {
+    const groups = new Map();
+    for (const entry of list) {
+      const name = (entry.itemId && itemById(entry.itemId)?.name) || entry.label;
+      const group = groups.get(name) || { count: 0, revenue: 0 };
+      group.count++;
+      group.revenue += entry.revenue;
+      groups.set(name, group);
+    }
+    return [...groups].map(([name, group]) => row(name + ' ×' + group.count, group.revenue)).join('');
+  };
+  const detail = (title, rows) => rows ? `<details><summary>${title}</summary><table>${rows}</table></details>` : '';
+  $('#modal').innerHTML = `<h3>第 ${state.day} 天收摊</h3>
+    <p class="settlement-total">今日净变化 <b class="${s.net >= 0 ? 'plus' : 'minus'}">${amount(s.net)}</b></p>
+    <p class="mut">余额 ¥${state.money} · 口碑 ${state.rep}</p>
+    <table aria-label="今日收支">
+      ${row('柜台销售 · ' + s.dayList.length + ' 件', s.dayTotal)}
+      ${row('收摊售卖 · ' + s.autoList.length + ' 件', s.autoTotal)}
+      ${row('白天支出', -s.daytimeSpend)}
+      ${row('其他收支', s.otherTotal)}
+    </table>
+    <button class="btn primary" onclick="nextDay()">进入明天</button>
+    <div class="settlement-details">
+      ${detail('柜台销售明细', sales(s.dayList))}
+      ${detail('收摊售卖明细', sales(s.autoList))}
+      ${detail('其他收支明细', s.others.map(entry => row(entry.label, entry.amount)).join(''))}
+    </div>`;
   $('#modal-mask').classList.remove('hidden');
 }
 

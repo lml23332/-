@@ -27,7 +27,7 @@ const CONFIG = {
     { served: .8, hour: 18, light: 'night' },
     { served: 1, hour: 20, light: 'night' },
   ],
-  reputation: { min: -100, max: 100, visitsPerPoint: 4, dailyLossLimit: 3, failedBidLoss: 1 },
+  reputation: { min: -100, max: 100, visitsPerPoint: 12, dailyLossLimit: 3, failedBidLoss: 1 },
   retail: {
     buyerCount: [1, 8],
     everydayBudget: [12, 25],
@@ -38,7 +38,7 @@ const CONFIG = {
     specificChance: .35,
     upsellFavor: 4,
     freshSaleFavor: 1,
-    freshSaleReputation: 1,
+    freshSaleRepProgress: 1,
     priceTolerance: { standard: 1.2, fresh: 1.5, mint: 1.65, bloom: 1.5 },
     conditionChance: .35,
     conditionCheckChance: .40,
@@ -47,7 +47,7 @@ const CONFIG = {
     receiptDiscount: .9,
     discountBudgetBoost: 2,
     roundOffAmount: 1,
-    courtesyReputation: 1,
+    courtesyRepProgress: 1,
     courtesyFavor: 1,
     maxUnitPrice: 9999,
   },
@@ -509,6 +509,19 @@ const SERVICE_NAMES = {
   organizer: '街坊宣传', clearance: '临期促销', poke: '戳戳乐', receiving: '收货鉴定',
   ledger: '熟客赊账', sticker: '集贴纸', premium: '高价货交易', grill: '烤肠机',
 };
+const TUTORIALS = [
+  { id: 'opening', title: '第一次开店', tab: 'wholesale', action: '去备货', text: '先向供货商订一批干脆面或汽水，再点「开店」。点窗前的顾客，按要求拿货、确认小票。接待完就可以收摊。' },
+  { id: 'organizer', unlock: 'organizer', title: '请小梁帮忙宣传', text: '点右上角「社区小梁」，付费后当天多来两位买家。每天可宣传一次。' },
+  { id: 'marbles', unlock: 'clearance', title: '供货商上新 · 玻璃弹珠', tab: 'wholesale', action: '看新货', text: '供货商现在能订玻璃弹珠。点商品下方的进货按钮订一批，之后可在柜台卖出。' },
+  { id: 'clearance', unlock: 'clearance', title: '处理临期食品', text: '有临期库存时，接待页面会出现促销区。点商品加到小票，默认是货架标价的七五折。顾客点名时仍要按要求拿货。' },
+  { id: 'poke', unlock: 'poke', title: '挂上戳戳乐', tab: 'poke', action: '看洞洞板', text: '点柜台右侧的戳戳乐，选一个大奖并挂上新板。顾客会自己选洞，打开板面可看结果，收入在收摊时入账。' },
+  { id: 'harmonica', unlock: 'receiving', title: '供货商上新 · 口琴', tab: 'wholesale', action: '看新货', text: '供货商现在能按批订口琴。进货前可比较今日进价与参考售价。' },
+  { id: 'receiving', unlock: 'receiving', title: '收旧货前先验货', text: '从下次开店起会遇到卖家。点击物品上的标记查线索，每件最多查三处。验完按自己的判断报价，起价被拒后还有一次机会。' },
+  { id: 'ledger', unlock: 'ledger', title: '给熟客记赊账', tab: 'ledger', action: '看赊账本', text: '提出赊账的熟客会在小票上出现「记赊账」。同意后可到赊账本看欠款和到期日，到期结果在收摊时结算。' },
+  { id: 'sticker', unlock: 'sticker', title: '开集贴纸活动', tab: 'sticker', action: '看活动', text: '在集贴纸页打开活动，再选择投放几张金龙贴纸。投得越多，顾客越可能集齐，兑付和投诉在收摊时结算。' },
+  { id: 'premium', unlock: 'premium', title: '开始交易高价货', text: '开店后可能遇到带贵重物件的卖家。收购前记得验货，并留够现金交租。洞洞板也多了高价大奖可选。' },
+  { id: 'grill', unlock: 'grill', title: '用烤肠机做热食', tab: 'wholesale', action: '看烤肠机', text: '先从供货商买烤肠机，再订烤肠或丸子串。放上烤位后，每送走一位顾客推进一次火候。熟了或开花时可加到小票，未解冻和烤糊的不能卖。' },
+];
 const NEIGHBORS = {
   mentor: { name: '邻居林姨', line: '先向供货商进货，再给放学的顾客结账。柜台卖得越多，能做的生意也会慢慢多起来。' },
   organizer: { name: '社区小梁', line: '我能帮你在街坊群里宣传，今天多来两位买家。', cost: 18, extraBuyers: 2 },
