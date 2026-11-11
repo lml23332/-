@@ -16,7 +16,24 @@ const CONFIG = {
   rentCycle: 7,             // 每 7 天交一次租
 
   sellersPerDay: 3,         // 每日基础卖家数（口碑≥60 再 +1）
-  buyersGuaranteed: 2,      // 货架有货时，每日买家保底人数
+  buyersGuaranteed: 3,      // 货架有货时，每日基础买家数
+  standardTradeMax: 75,
+  counterSlots: 6,
+  reputation: { min: -100, max: 100, visitsPerPoint: 4, dailyLossLimit: 3, failedBidLoss: 1 },
+  retail: {
+    buyerCount: [1, 8],
+    everydayBudget: [12, 25],
+    specialtyBudget: [30, 115],
+    premiumBudget: [120, 420],
+    selfPickChance: .45,
+    selfPickCount: [1, 3],
+    specificChance: .35,
+    conditionChance: .35,
+    conditionCheckChance: .40,
+    conditionPenalty: 2,
+    clearanceMultiplier: .75,
+    maxUnitPrice: 9999,
+  },
 
   // 成色抽取概率（真品 / 残次 / 山寨）
   variantOdds: { real: 0.55, bad: 0.25, fake: 0.20 },
@@ -34,7 +51,7 @@ const CONFIG = {
 
   fakeComplaintChance: 0.25,    // 山寨货卖出后被投诉概率
   fakeComplaintFine: 10,        // 投诉罚款
-  fakeComplaintRep: -6,         // 投诉扣口碑
+  fakeComplaintRep: -1,         // 投诉扣口碑
 
   creditChance: 0.25,       // 熟客买家提出赊账的概率
   creditDueDays: [2, 3],    // 赊账到期天数
@@ -102,7 +119,7 @@ const SELLER_PITCH = [
 const POKE = {
   boardCost: 48,        // 每板进货价
   holes: 24,            // 每板洞数
-  price: 3,             // 顾客每戳一洞付费
+  price: 5,             // 顾客每戳一洞付费
   smallPrizeCost: 1,    // 每洞小奖成本
   basePokes: 4,         // 每日基础戳洞人数
   grandTraffic: 3,      // 大奖在架时每日额外人数
@@ -118,14 +135,14 @@ const POKE = {
 const STICKER = {
   snackIncome: [8, 18],     // 活动开启时每日顺带收入
   redeemPay: 100,           // 集满兑付金额
-  redeemRep: 12,            // 兑付赢得的口碑
+  redeemRep: 1,             // 兑付赢得的口碑
   rareMax: 5,               // 金龙贴纸最大投放量
   redeemChancePerRare: 0.02,// 每张投放量带来的每日集满概率
   grumbleZero: [8, 14],     // 投放 0 时每日嘀咕值增长
   grumbleHas: [0, 3],       // 投放 ≥1 时每日嘀咕值增长
   grumbleLimit: 100,        // 嘀咕值上限触发投诉
   complaintFine: 30,        // 投诉罚款
-  complaintRep: -8,         // 投诉扣口碑
+  complaintRep: -1,         // 投诉扣口碑
   grumbleAfterComplaint: 40,// 投诉后嘀咕值回落
 };
 
@@ -141,7 +158,7 @@ const ITEMS = [
       ['镭射膜', '晃一晃彩虹纹流动自然', '彩虹纹呆板，角度不对就发暗', '膜面完好，只是沾了点油渍'],
       ['边角', '四角尖挺，没有毛边', '切边毛糙，有轻微分层', '有一个角磨圆了']],
   },
-  { id: 'baowan', name: '爆丸', emoji: '🔮', cat: '玩具', base: [25, 70],
+  { id: 'baowan', name: '弹开球', emoji: '🔮', cat: '玩具', base: [25, 70],
     flavor: '滚过磁卡「啪」地弹开变身，当年在校门口能横着走。',
     checks: [
       ['磁吸感应', '贴近磁卡立刻有吸力', '吸力若有似无，要凑很近', '吸力正常，但反应慢半拍'],
@@ -157,7 +174,7 @@ const ITEMS = [
       ['发射器齿条', '齿口完整，拉动有劲', '齿口发白，有崩齿', '齿条完好，拉绳有点起毛'],
       ['表面印刷', '标志清晰，电镀均匀', '标志字母间距怪，电镀发乌', '印刷没毛病，贴纸被撕掉一半']],
   },
-  { id: 'siduche', name: '田宫四驱车', emoji: '🏎️', cat: '玩具', base: [60, 160],
+  { id: 'siduche', name: '四驱车', emoji: '🏎️', cat: '玩具', base: [60, 160],
     flavor: '校门口改装大赛的硬通货，马达和导轮都是钱。',
     checks: [
       ['车壳印刷', '字迹锐利，贴纸对位准', '贴纸歪斜，颜色发闷', '印刷没毛病，壳角有道裂纹'],
@@ -205,7 +222,7 @@ const ITEMS = [
       ['表带', '表带沉手，扣具咬合紧', '表带轻得发飘，边角割手', '表带没问题，针扣有点松'],
       ['表镜', '表镜通透，侧光没有发蓝边', '表镜发雾，边缘一圈蓝光', '表镜清楚，就是有一道细划痕']],
   },
-  { id: 'gangbi', name: '英雄钢笔', emoji: '🖊️', cat: '文具', base: [15, 50],
+  { id: 'gangbi', name: '老式钢笔', emoji: '🖊️', cat: '文具', base: [15, 50],
     flavor: '吸满一管墨水，能写完整个暑假作业。',
     checks: [
       ['笔尖', '笔尖刻字清楚，铱点圆润', '笔尖偏软，刻字模糊', '笔尖没问题，就是有点挂纸'],
@@ -281,7 +298,7 @@ ITEMS.push(
       ['鞋底', '纹路深，材质有弹性', '鞋底发硬，纹路浅得像印的', '鞋底没问题，后跟磨偏了一点'],
       ['鞋盒', '盒标印刷清楚，码数齐全', '盒子软塌，印刷还偏色', '鞋盒完整，就是边角压扁了']],
   },
-  { id: 'youxiwangka', name: '游戏王卡牌', emoji: '🂡', cat: '卡牌', base: [15, 70],
+  { id: 'youxiwangka', name: '对战卡牌', emoji: '🂡', cat: '卡牌', base: [15, 70],
     flavor: '金字红字分等级，一张金闪能换一堆散卡。',
     checks: [
       ['镭射防伪', '右下角镭射方块角度正', '镭射发暗，图案对不上', '镭射没问题，卡面有指纹印'],
@@ -376,8 +393,8 @@ const WHOLESALE = [
   { id: 'wh-noodles', name: '干脆面', emoji: '🍜', cost: 2, value: 4, pack: 6 },
   { id: 'wh-soda', name: '橘子汽水', emoji: '🥤', cost: 3, value: 5, pack: 6 },
   { id: 'wh-notebook', name: '田字格本', emoji: '📒', cost: 4, value: 7, pack: 4 },
-  { id: 'danzhu', name: '玻璃弹珠', cost: 3, value: 6, pack: 4, unlockDay: 3 },
-  { id: 'kouqin', name: '口琴', cost: 11, value: 19, pack: 2, unlockDay: 5 },
+  { id: 'danzhu', name: '玻璃弹珠', cost: 3, value: 6, pack: 4, unlock: 'clearance' },
+  { id: 'kouqin', name: '口琴', cost: 11, value: 19, pack: 2, unlock: 'receiving' },
 ];
 
 // 按天轮换进价与缺货。同一天刷新或回档时供货条件一致。
@@ -454,11 +471,39 @@ const CONDITION = {
   spoiled: { name: '坏了', color: 'white', factor: .25 },
 };
 const FOOD_LIFE = { 'wh-noodles': 5, 'wh-soda': 7 };
-const SERVICE_DAYS = { poke: 3, sticker: 5, ledger: 5 };
-const SHOP_EVENTS = {
-  1: { role: 'mentor', name: '邻居林姨', line: '先从进货和接待顾客开始。攒到 ¥3000 就能盘下店面，每七天还要留钱交房租。' },
-  2: { role: 'organizer', name: '社区小梁', line: '我可以帮你在街坊群里宣传。花 ¥18，今天多来两位买家。' },
-  3: { role: 'mentor', name: '邻居林姨', line: '今天可以进戳戳乐了。摆上洞洞板，收摊时结算当天的收入。' },
-  5: { role: 'mentor', name: '邻居林姨', line: '今天开放集贴纸和赊账。熟客记账前，先想想能不能按时收回来。' },
-  6: { role: 'mentor', name: '邻居林姨', line: '明天房东要来，记得留够现金。' },
+// 完成的付现柜台小票数与已经收摊的天数，两个条件都要达到。
+const MILESTONES = {
+  organizer: [2, 1],
+  clearance: [6, 3],
+  poke: [10, 4],
+  receiving: [16, 6],
+  ledger: [22, 8],
+  sticker: [28, 10],
+  premium: [36, 13],
+  grill: [44, 15],
+};
+const SERVICE_NAMES = {
+  organizer: '街坊宣传', clearance: '临期促销', poke: '戳戳乐', receiving: '收货鉴定',
+  ledger: '熟客赊账', sticker: '集贴纸', premium: '高价货交易', grill: '烤肠机',
+};
+const NEIGHBORS = {
+  mentor: { name: '邻居林姨', line: '先向供货商进货，再给放学的顾客结账。柜台卖得越多，能做的生意也会慢慢多起来。' },
+  organizer: { name: '社区小梁', line: '我能帮你在街坊群里宣传，今天多来两位买家。', cost: 18, extraBuyers: 2 },
+};
+const GRILL = {
+  cost: 180,
+  capacity: 4,
+  extraStudents: 2,
+  studentNames: ['背书包的学生', '放学的学生'],
+  stages: [
+    { key: 'frozen', name: '未解冻', turns: 0, factor: 0 },
+    { key: 'raw', name: '未熟', turns: 1, factor: .6, checkChance: .55 },
+    { key: 'cooked', name: '熟了', turns: 2, factor: 1 },
+    { key: 'bloom', name: '开花', turns: 3, factor: 1.25 },
+    { key: 'burnt', name: '烤糊', turns: 5, factor: 0 },
+  ],
+  foods: [
+    { id: 'grill-sausage', name: '烤肠', emoji: '🌭', cat: '热食', cost: 2, pack: 8, value: 6 },
+    { id: 'grill-ball', name: '丸子串', emoji: '🍡', cat: '热食', cost: 3, pack: 6, value: 8 },
+  ],
 };

@@ -790,5 +790,309 @@ main { grid-template-columns: minmax(0, 1fr); }
   #counter.seller-stage #action-area { grid-template-columns: minmax(0, 1fr); }
   .seller-inspection .inspection-object { width: min(100%, 152px); }
   .top-actions { flex-wrap: wrap; }
-  .display { margin-top: -9%; }
+}
+
+.art-filters { position: absolute; pointer-events: none; }
+.item-art { filter: url("#item-key"); }
+.item-art-handheld { filter: url("#handheld-key"); }
+.item-preview { background: transparent; }
+
+/* 以桌板前沿为基准摆放货架、账本和进货牌。 */
+.display {
+  position: absolute;
+  inset: auto 8% 9.6%;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: end;
+  gap: clamp(4px, 1.5cqw, 20px);
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+.counter-zone {
+  display: grid;
+  place-items: end center;
+  padding: clamp(2px, .45cqw, 7px);
+  border: 1px solid #ffca8877;
+  border-radius: 3px;
+  background: #351e1344;
+}
+.shelf-zone { width: clamp(92px, 22cqw, 246px); }
+#counter-stock {
+  aspect-ratio: 2.65;
+  padding: 0;
+  align-items: stretch;
+  justify-items: stretch;
+}
+.display-slot {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid #edb78255;
+  background: transparent;
+  color: #f1be867f;
+  font: inherit;
+  cursor: pointer;
+}
+.display-slot:hover { background: #ffdf9b30; }
+#counter-stock .item-art { width: clamp(13px, 3cqw, 38px); }
+.counter-book, #open-wholesale { min-height: clamp(26px, 4.8cqw, 48px); }
+.counter-book { width: clamp(49px, 8cqw, 106px); margin: 0 3px 3px 0; }
+#open-wholesale { padding: 2px 8px; }
+.walkers { inset: 26% 8% 22.5%; }
+.walker-second { bottom: 33%; }
+.walker .person { width: clamp(19px, 5.9cqw, 80px); aspect-ratio: 3 / 7; opacity: .8; }
+.walker-second .person { scale: -.82 .82; transform-origin: bottom; opacity: .65; }
+.person::before { filter: brightness(.63) saturate(.8); }
+.person::after { background: #393638; }
+.guest-call { bottom: 21.8%; }
+.trade-dialogue { bottom: 26%; }
+
+.street-status, .shop-npc {
+  top: 15%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid #c79e62;
+  border-radius: 5px;
+  background: #292219ed;
+  color: #fff0cb;
+  box-shadow: 0 3px #201810a8;
+  font: inherit;
+  text-align: left;
+}
+.street-status strong, .shop-npc strong { display: block; font-size: clamp(11px, 1.4cqw, 15px); }
+.street-status small, .shop-npc small { display: block; color: #ead1aa; font-size: clamp(10px, 1.1cqw, 12px); }
+.street-status i { width: 8px; height: 8px; border-radius: 50%; background: #e2b26d; }
+.shop-npc { right: 9%; cursor: pointer; }
+.shop-npc:hover { border-color: #fff0ca; }
+.neighbor-avatar {
+  width: clamp(24px, 3.8cqw, 40px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #785338 url("../assets/neighborhood-npcs.png") 0 top / 400% 200% no-repeat;
+}
+.shop-npc[data-npc="organizer"] .neighbor-avatar { background-position-x: 33.3333%; }
+.shop-npc[data-npc="landlord"] .neighbor-avatar { background-position-x: 66.6667%; }
+#display-picker {
+  width: min(90vw, 340px);
+  margin: auto;
+  padding: 16px;
+  border: 2px solid #d7ae73;
+  background: #20362b;
+  color: #fff0cf;
+}
+#display-picker::backdrop { background: #101912bb; }
+#display-picker h2, #display-picker select { width: 100%; }
+#display-picker select { min-height: 38px; margin-bottom: 8px; font: inherit; }
+
+.checkout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(260px, 1fr); gap: 16px; width: 100%; }
+.checkout-stock { min-width: 0; }
+.buyer-request { color: #ffdfab; margin-bottom: 10px; }
+.checkout-options { margin-bottom: 10px; }
+.checkout-options h3 { color: #f6d69a; font-size: 14px; margin-bottom: 4px; }
+.checkout-options .buyer-options { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 4px; }
+.checkout-options .stock-tile { background: #472e22; }
+.checkout-options .stock-tile:hover { background: #664331; }
+.receipt {
+  position: relative;
+  align-self: start;
+  padding: 14px;
+  color: #352518;
+  background: #f7e8ca;
+  box-shadow: 0 3px 9px #10191177;
+}
+.receipt::after {
+  content: "";
+  position: absolute;
+  inset: 100% 0 auto;
+  height: 5px;
+  background: linear-gradient(135deg, #f7e8ca 25%, transparent 25%) 0 0 / 10px 10px,
+    linear-gradient(225deg, #f7e8ca 25%, transparent 25%) 0 0 / 10px 10px;
+}
+.receipt header, .receipt-totals { display: grid; gap: 4px; padding-bottom: 8px; border-bottom: 1px dashed #9e7852; }
+.receipt header strong { font-size: 20px; }
+.receipt small, .receipt-empty { color: #634b37; }
+.receipt small { display: block; font-size: 12px; }
+.receipt-empty { padding: 10px 0; }
+.receipt-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px 8px;
+  padding-block: 8px;
+  border-bottom: 1px dotted #b49b78;
+}
+.receipt-line input {
+  width: 66px;
+  min-height: 34px;
+  padding-inline: 5px;
+  border: 1px solid #9e7852;
+  border-radius: 3px;
+  background: #fff6e2;
+  color: #352518;
+  font: inherit;
+}
+.receipt-line button {
+  min-height: 32px;
+  border: 1px solid #b39870;
+  border-radius: 3px;
+  background: #ead7b2;
+  color: #352518;
+  font: inherit;
+  cursor: pointer;
+}
+.receipt-remove { min-width: 30px; }
+.receipt-line .receipt-label { grid-column: 1 / -1; justify-self: start; padding: 0 6px; font-size: 12px; }
+.receipt-totals { grid-template-columns: 1fr auto; margin-block: 10px; }
+.receipt-totals small { grid-column: 1 / -1; }
+.receipt-totals .over-budget { color: #982f20; font-weight: 700; }
+@media (max-width: 600px) {
+  .checkout { grid-template-columns: minmax(0, 1fr); }
+  .receipt { grid-row: 1; }
+  .street-status, .shop-npc { gap: 5px; padding: 4px 6px; }
+  #counter-stock { aspect-ratio: auto; grid-template-rows: repeat(2, minmax(19px, auto)); }
+}
+
+.display { grid-template-columns: auto auto auto 1fr auto; }
+.shelf-zone { grid-column: 1; }
+#open-poke { grid-column: 2; }
+#open-grill { grid-column: 3; }
+.book-zone { grid-column: 4; justify-self: end; }
+.supply-zone { grid-column: 5; }
+.counter-poke, .counter-grill {
+  display: grid;
+  justify-items: center;
+  position: relative;
+  width: clamp(48px, 10cqw, 128px);
+  padding: 3px;
+  border: 2px solid #c58550;
+  border-bottom: 4px solid #512919;
+  background: #6c3b25;
+  color: #fff1ca;
+  box-shadow: 2px 3px #412818b0;
+  cursor: pointer;
+  font: inherit;
+}
+.counter-pegboard {
+  display: block;
+  width: 100%;
+  padding: 4px;
+  border: 2px solid #492819;
+  background: radial-gradient(circle, #432918 1px, #996940 1px) 0 0 / 6px 6px;
+}
+#counter-poke-holes {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  padding: 2px;
+  background: #8a2727;
+}
+#counter-poke-holes i { aspect-ratio: 1; background: #f6bc53; border: 1px solid #b76431; }
+#counter-poke-holes .open { background: #392019; border-color: #633b24; }
+.counter-poke-label { font-size: clamp(9px, 1.2cqw, 14px); white-space: nowrap; }
+.counter-grill { border-color: #939591; background: #42443c; }
+.grill-rollers {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2.8;
+  border: 2px solid #252722;
+  background: repeating-linear-gradient(#a7aba0 0 3px, #3f433a 3px 6px);
+}
+.neighbor-dock {
+  position: absolute;
+  top: 15%;
+  right: 9%;
+  z-index: 2;
+  display: flex;
+  gap: 5px;
+}
+.neighbor-dock .shop-npc { position: static; }
+.shop-npc[aria-expanded="true"] { border-color: #ffe1ab; }
+#neighborhood.neighbor-talk {
+  position: absolute;
+  z-index: 4;
+  top: 29%;
+  left: 9%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 12px;
+  width: min(46%, 420px);
+  padding: 10px;
+  text-align: left;
+  border-left: 4px solid #e9af61;
+  box-shadow: 0 4px 10px #16130da0;
+}
+#neighborhood-portrait { width: clamp(36px, 7cqw, 86px); }
+#neighborhood-name { font-size: clamp(14px, 2cqw, 20px); }
+#neighborhood.neighbor-talk p { margin: 4px 0 8px; font-size: clamp(12px, 1.6cqw, 15px); line-height: 1.4; }
+.neighbor-talk .btn { min-height: 30px; padding: 4px 8px; font-size: 12px; }
+.poke-board {
+  width: min(100%, 470px);
+  margin: 6px auto;
+  padding: 12px;
+  border: 6px solid #a4663f;
+  border-top-color: #c08656;
+  background: radial-gradient(circle, #53351f 1px, #754929 1px) 0 0 / 7px 7px;
+}
+.poke-board .row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+.poke-board p { margin-top: 10px; }
+.poke-hole {
+  aspect-ratio: 1;
+  min-width: 0;
+  border: 2px solid #a65629;
+  border-radius: 2px;
+  background: #f6bf5b;
+  box-shadow: inset 0 3px #ffe5a1, 0 2px #45281b;
+  color: #48291d;
+  font: inherit;
+  font-weight: bold;
+  cursor: pointer;
+}
+.poke-hole:not(:disabled):hover { background: #ffe2a0; }
+.poke-hole.open { background: #302119; box-shadow: inset 0 3px #191411; color: #f7c475; }
+.poke-hole:disabled { cursor: default; }
+.milestones { margin-top: 10px; }
+.milestones summary { cursor: pointer; }
+.milestones ul { margin: 8px 0 0 20px; line-height: 1.6; }
+.grill-rack {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-block: 12px;
+  padding: 8px;
+  border: 4px solid #a1a399;
+  background: repeating-linear-gradient(#777b70 0 5px, #353a32 5px 11px);
+}
+.grill-slot {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 4px;
+  min-height: 118px;
+  padding: 5px;
+  background: #27261fdd;
+  text-align: center;
+}
+.grill-slot small { color: #e9b87d; }
+.grill-food-icon { font-size: 27px; }
+.grill-slot[data-stage="frozen"] .grill-food-icon { filter: saturate(.45) drop-shadow(0 0 5px #90d5ff); }
+.grill-slot[data-stage="bloom"] .grill-food-icon { filter: drop-shadow(0 0 5px #ffc766); }
+.grill-slot[data-stage="burnt"] .grill-food-icon { filter: brightness(.4) saturate(.45); }
+@media (max-width: 600px) {
+  .neighbor-dock { flex-direction: column; }
+  #neighborhood.neighbor-talk { top: 31%; width: min(68%, 320px); gap: 5px; }
+  .grill-rack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 410px) {
+  .display { inset-inline: 6%; }
+  .counter-poke, .counter-grill { width: 42px; padding: 2px; }
+  .counter-pegboard { padding: 2px; }
+  .shelf-zone { width: 82px; }
+  .counter-book { width: 42px; }
+  #open-wholesale { padding-inline: 5px; }
 }
