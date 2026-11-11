@@ -98,7 +98,7 @@ xiaomaibu-codex-project/
 - 店内固定视角面向校门口。窗前顾客可点击接待。街上路人是场景动画。卖家验货和报价同页，买家在同一页选货并编辑小票。
 - 点桌上的陈列格可以指定商品、恢复自动陈列或留空。商品详情可从库存和进货页打开。流水账显示柜台交易、进货及营业事件。
 - 旧物图集和顾客立绘位于 `assets/`。商品缩略图在渲染时滤掉绿色底色。掌机验货可翻看正背面，其他旧物通过图上的标记验货。
-- `school-window.png` 是无人物的像素背景，`customer-portraits.png` 和 `neighborhood-npcs.png` 提供原创角色，`items-a.png` 和 `items-b.png` 按 `ITEM_ATLASES` 排列。浏览器内可以调节背景音乐音量。
+- `school-window.png` 是黄昏背景，`school-window-*.png` 是同一机位的其他时段。顾客画像在 `customer-portraits*.png`，街坊画像在 `neighborhood-npcs.png`。物品图集按 `ITEM_ATLASES` 排列。浏览器内可以调节背景音乐音量。
 
 ## 协作开发
 
