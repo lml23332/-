@@ -40,6 +40,9 @@ function newState() {
     displaySlots: [],
     promoDay: 0,
     started: false,
+    shopOpen: false,
+    visitsToday: 0,
+    clockServed: 0,
     guide: true,
     openingMoney: CONFIG.startMoney,
     settlement: null,
@@ -115,6 +118,9 @@ function load() {
     if (!s.progress.kept.includes('receiving') && s.progress.sales < MILESTONES.receiving[0]) {
       s.queue = (s.queue || []).filter(guest => guest.type !== 'seller');
       if (s.current?.type === 'seller') s.current = null;
+    }
+    if (typeof s.shopOpen !== 'boolean') {
+      s.shopOpen = !!(s.settlement || s.current || s.queue?.length || s.wholesaleOrders?.length || s.daySales?.length);
     }
     return Object.assign(newState(), { started: true, guide: false }, s); // 用默认值兜底新字段，保证老存档可续
   } catch (e) { return null; }
@@ -221,8 +227,8 @@ function recruitShoppers() {
   for (let i = 0; i < extraBuyers; i++) state.queue.push({ type: 'buyer' });
   notifyPlayer('社区宣传已安排，今天多来 ' + extraBuyers + ' 位买家。');
   closeNeighborhood();
-  if (!state.current) nextVisitor();
-  else renderAll();
+  if (state.shopOpen && !state.current) nextVisitor();
+  else { renderAll(); save(); }
 }
 
 function buyerObjection(guest, stock) {
@@ -407,7 +413,12 @@ function enqueueBuyers() {
   for (let i = 0; i < count; i++) state.queue.push({ type: 'buyer' });
 }
 
-function startDay() {
+function prepareDay() {
+  state.shopOpen = false;
+  state.visitsToday = 0;
+  state.clockServed = 0;
+  state.current = null;
+  tradeOpen = false;
   state.openingMoney = state.money;
   state.wholesaleOrders = [];
   state.settlement = null;
@@ -417,11 +428,16 @@ function startDay() {
   state.poke.dayOpened = 0;
   state.poke.dayLimit = POKE.basePokes + (state.poke.grandTaken ? 0 : POKE.grandTraffic);
   state.queue = [];
+}
+
+function startDay() {
+  if (state.shopOpen || state.settlement) return;
+  state.shopOpen = true;
   if (serviceAvailable('receiving')) {
     const count = CONFIG.sellersPerDay + (state.rep >= 65 ? 1 : 0);
     for (let i = 0; i < count; i++) state.queue.push(makeSeller());
   }
-  if (state.shelf.some(retailAvailable)) enqueueBuyers();
+  enqueueBuyers();
   for (let i = state.queue.length - 1; i > 0; i--) {
     const j = randInt(0, i);
     [state.queue[i], state.queue[j]] = [state.queue[j], state.queue[i]];
@@ -429,10 +445,12 @@ function startDay() {
   enqueueStudents();
   addLog(`开店啦，今天有 ${state.queue.length} 位顾客排队。`);
   nextVisitor();
+  $(state.current ? '#guest-call' : '#btn-endday').focus();
 }
 
 function finishVisit() {
   state.serviceTurns++;
+  state.visitsToday++;
   nextVisitor();
 }
 
@@ -565,6 +583,49 @@ function receiptTotal(guest) {
   return guest.receipt.reduce((sum, row) => sum + row.price, 0);
 }
 
+function receiptQuote(guest) {
+  const rules = CONFIG.retail;
+  const subtotal = receiptTotal(guest);
+  const discounted = guest.discounted ? Math.round(subtotal * rules.receiptDiscount) : subtotal;
+  const discount = subtotal - discounted;
+  const budget = guest.cap + (discount ? rules.discountBudgetBoost : 0);
+  const roundOff = discounted - budget === rules.roundOffAmount ? rules.roundOffAmount : 0;
+  return { subtotal, discount, budget, roundOff, total: discounted - roundOff };
+}
+
+function buyerReply(guest, quote) {
+  if (quote.discount) return '整单打九折呀！我再拿 ¥' + CONFIG.retail.discountBudgetBoost + '，预算一共 ¥' + quote.budget + '。';
+  if (quote.roundOff) return '就差 ¥' + quote.roundOff + '，能帮我抹个零吗？';
+  return '';
+}
+
+function updateReceipt(guest) {
+  const quote = receiptQuote(guest);
+  const reply = buyerReply(guest, quote);
+  $('#receipt-total').textContent = '¥' + quote.total;
+  $('#receipt-savings').textContent = [
+    quote.discount ? '原价 ¥' + quote.subtotal + ' · 整单优惠 −¥' + quote.discount : '',
+    quote.roundOff ? '抹零 −¥' + quote.roundOff : '',
+  ].filter(Boolean).join(' · ');
+  const over = quote.total > quote.budget;
+  $('#receipt-budget').textContent = over ? '超出预算 ¥' + (quote.total - quote.budget) : '预算余 ¥' + (quote.budget - quote.total);
+  $('#receipt-budget').classList.toggle('over-budget', over);
+  $('#receipt-discount').disabled = !guest.discounted && Math.round(quote.subtotal * CONFIG.retail.receiptDiscount) === quote.subtotal;
+  $('#buyer-reply').textContent = reply;
+  $('#buyer-reply').classList.toggle('hidden', !reply);
+  renderDialogue(guest, guest.regularId ? '熟客 · 买家' : '买家', [guest.line, reply].filter(Boolean));
+}
+
+function toggleReceiptDiscount() {
+  const guest = state.current;
+  if (guest?.type !== 'buyer' || !guest.receipt.length) return;
+  guest.discounted = !guest.discounted;
+  $('#receipt-discount').textContent = guest.discounted ? '取消九折' : '整单 −10%';
+  $('#receipt-discount').setAttribute('aria-pressed', String(guest.discounted));
+  updateReceipt(guest);
+  save();
+}
+
 function editReceipt(uid, action) {
   const guest = state.current;
   if (guest?.type !== 'buyer' || state.settlement) return;
@@ -588,12 +649,9 @@ function editReceiptPrice(uid, input) {
   const valid = input.value !== '' && Number.isInteger(price) && price >= 0 && price <= CONFIG.retail.maxUnitPrice;
   if (valid) {
     row.price = price;
+    updateReceipt(guest);
     save();
   }
-  const total = receiptTotal(guest);
-  $('#receipt-total').textContent = '¥' + total;
-  $('#receipt-budget').textContent = total > guest.cap ? '超出预算 ¥' + (total - guest.cap) : '预算余 ¥' + (guest.cap - total);
-  $('#receipt-budget').classList.toggle('over-budget', total > guest.cap);
 }
 
 function receiptObjection(guest, lines) {
@@ -615,9 +673,10 @@ function settleBuyerSale(onCredit = false) {
   if (onCredit && (!guest.creditAsk || !serviceAvailable('ledger'))) return;
   const lines = receiptLines(guest);
   if (lines.length !== guest.receipt.length || lines.some(({ stock }) => !retailAvailable(stock))) return notifyPlayer('小票里的库存有变动，请重新选货。');
-  const total = receiptTotal(guest);
+  const quote = receiptQuote(guest);
+  const { total } = quote;
   if (onCredit && total === 0) return notifyPlayer('小票合计为零，可以直接结账。');
-  if (total > guest.cap) return notifyPlayer('小票超过顾客预算，可以减价或删掉商品。');
+  if (total > quote.budget) return notifyPlayer('小票超过顾客预算，可以打折、减价或删掉商品。');
   const mismatch = receiptObjection(guest, lines);
   if (mismatch) return notifyPlayer(guest.name + '：' + mismatch);
   for (const { row, stock, item } of lines) {
@@ -643,14 +702,26 @@ function settleBuyerSale(onCredit = false) {
   } else {
     state.money += total;
     if (total > 0) state.progress.sales++;
+    let running = 0;
+    let allocated = 0;
     for (const { row, stock, item } of lines) {
-      state.daySales.push({ itemId: item.id, label: guest.name + ' 买走' + item.name, revenue: row.price, profit: row.price - stock.cost });
+      running += row.price;
+      const share = quote.subtotal ? Math.round(total * running / quote.subtotal) : 0;
+      const revenue = share - allocated;
+      allocated = share;
+      state.daySales.push({ itemId: item.id, label: guest.name + ' 买走' + item.name, revenue, profit: revenue - stock.cost });
     }
     addLog(`${label}，实收 ¥${total}。`);
   }
   const discount = total < lines.reduce((sum, { stock }) => sum + counterPrice(stock), 0);
   if (total > 0) countGoodVisit();
-  if (guest.regularId) addFavor(guest.regularId, discount ? 2 : 1);
+  if (guest.regularId) addFavor(guest.regularId, (discount ? 2 : 1) + (quote.discount || quote.roundOff ? CONFIG.retail.courtesyFavor : 0));
+  if (quote.discount || quote.roundOff) {
+    changeReputation(CONFIG.retail.courtesyReputation);
+    finishVisit();
+    notifyPlayer(guest.name + (quote.roundOff ? '：谢谢你帮我抹零！' : '：谢谢你给我打折！'));
+    return;
+  }
   finishVisit();
 }
 
@@ -683,7 +754,7 @@ function orderWholesale(id) {
   }
   addLog(`供货商送来 ${product.name} ×${product.pack}，进货支出 ¥${total}。`);
 
-  if (firstOrder && (!state.current || state.current.type !== 'buyer') && !state.queue.some(visitor => visitor.type === 'buyer')) {
+  if (state.shopOpen && firstOrder && (!state.current || state.current.type !== 'buyer') && !state.queue.some(visitor => visitor.type === 'buyer')) {
     enqueueBuyers();
     if (!state.current) return nextVisitor();
   }
@@ -789,8 +860,10 @@ function buyGrill() {
   state.money -= GRILL.cost;
   state.grill.owned = true;
   addLog('烤肠机到货，放学时会多来几位学生。');
-  enqueueStudents();
-  if (!state.current) return nextVisitor();
+  if (state.shopOpen) {
+    enqueueStudents();
+    if (!state.current) return nextVisitor();
+  }
   renderAll(); save();
 }
 
@@ -835,6 +908,7 @@ function discardGrillFood(uid) {
  * ============================================================ */
 function endDay() {
   if (state.settlement) return showSettlement(state.settlement);
+  if (!state.shopOpen) return;
   if (state.current || state.queue.length) return notifyPlayer('还有顾客在等，先接待完再收摊。');
   const strat = STRATEGIES[state.strategy];
   const cashBeforeClosing = state.money;
@@ -946,9 +1020,10 @@ function nextDay() {
   $('#modal-mask').classList.add('hidden');
   if (state.day === 1) state.guide = false;
   state.day++;
-  startDay();
+  prepareDay();
   renderAll(); save();
   if (state.day % CONFIG.rentCycle === 0) openNeighborhood('mentor');
+  $('#btn-openday').focus();
 }
 
 /* ============================================================
@@ -974,7 +1049,8 @@ function renderGuide() {
   const guest = state.current;
   const hasOrdered = state.wholesaleOrders.length > 0;
   let text;
-  if (state.settlement) text = '看完今天的流水，点「明天开店」进入下一天。';
+  if (state.settlement) text = '看完今天的流水，点「进入明天」。';
+  else if (!state.shopOpen) text = '可以先点「进货」备货，准备好后点「开店」。';
   else if (guest && guest.type === 'buyer') text = '点窗前的顾客，按他的需求准备商品并开小票。';
   else if (!hasOrdered && (state.shelf.length || !guest) && state.money >= WHOLESALE[0].cost * WHOLESALE[0].pack) {
     text = '试试从供货商补货。点窗台的「进货」，订一批干脆面。';
@@ -1046,6 +1122,23 @@ function viewStock(uid) {
   if (stock) viewItem(stock.itemId, uid);
 }
 
+function renderShopClock() {
+  const remaining = state.queue.length + Number(!!state.current);
+  const total = state.visitsToday + remaining;
+  const served = state.settlement ? 1 : !state.shopOpen ? 0 : remaining ? state.visitsToday / total : 1;
+  state.clockServed = Math.max(state.clockServed, served);
+  const schedule = CONFIG.openingHours;
+  const index = schedule.findIndex(point => point.served > state.clockServed);
+  const earlier = index < 0 ? schedule[schedule.length - 1] : schedule[index - 1];
+  const later = index < 0 ? earlier : schedule[index];
+  const fraction = index < 0 ? 0 : (state.clockServed - earlier.served) / (later.served - earlier.served);
+  const minutes = Math.round((earlier.hour + (later.hour - earlier.hour) * fraction) * 60);
+  const time = String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
+  $('#shop-clock').textContent = time;
+  $('#shop-clock').setAttribute('datetime', time);
+  $('.street').dataset.light = earlier.light;
+}
+
 function renderWindow() {
   const guest = state.current;
   const call = $('#guest-call');
@@ -1059,10 +1152,13 @@ function renderWindow() {
   $('#guest-label').textContent = guest
     ? guest.name + (guest.type === 'seller' ? ' · 来卖货' : ' · 来买货') + (tradeOpen ? '　收起交易' : '　接待')
     : '';
-  $('#street-status strong').textContent = guest ? '营业中' : state.settlement ? '已打烊' : state.shelf.length ? '可收摊' : '待补货';
+  renderShopClock();
+  $('#btn-openday').classList.toggle('hidden', state.shopOpen || !!state.settlement);
+  $('#btn-endday').classList.toggle('hidden', !state.shopOpen && !state.settlement);
+  $('#street-status strong').textContent = guest ? '营业中' : state.settlement ? '已打烊' : state.shopOpen ? '可收摊' : '待开店';
   $('#street-status small').textContent = guest
     ? '等候 ' + state.queue.length + ' 位'
-    : state.settlement ? '明天见' : state.shelf.length ? '等候 0 位' : '向供货商进货';
+    : state.settlement ? '明天见' : state.shopOpen ? '等候 0 位' : '可先备货';
   renderCounterSlots();
   $('#open-poke').classList.toggle('hidden', !serviceAvailable('poke'));
   $('#open-grill').classList.toggle('hidden', !state.grill.owned);
@@ -1234,7 +1330,6 @@ function customBid() {
 }
 
 function renderBuyer(guest, area, act) {
-  renderDialogue(guest, guest.regularId ? '熟客 · 买家' : '买家', [guest.line]);
   area.innerHTML = '';
   const lines = receiptLines(guest);
   const reserved = new Set(guest.receipt.map(row => row.uid));
@@ -1242,11 +1337,10 @@ function renderBuyer(guest, area, act) {
   const clearance = available.filter(stock => serviceAvailable('clearance') && stockCondition(stock) === 'near');
   const grilled = available.filter(stock => stock.grilled);
   const regular = available.filter(stock => !stock.grilled && !clearance.includes(stock));
-  const total = receiptTotal(guest);
-  const over = total > guest.cap;
   act.innerHTML = `<div class="checkout">
     <div class="checkout-stock">
       <p class="buyer-request">${guest.line}</p>
+      <p id="buyer-reply" class="buyer-request hidden"></p>
       ${renderBuyerOptions('货架', regular, guest)}
       ${clearance.length ? renderBuyerOptions('临期促销区', clearance, guest) : ''}
       ${grilled.length ? renderBuyerOptions('现烤热食', grilled, guest) : ''}
@@ -1255,14 +1349,16 @@ function renderBuyer(guest, area, act) {
     <form class="receipt" onsubmit="event.preventDefault(); settleBuyerSale()">
       <header><strong>购物小票</strong><small>第 ${state.day} 天 · ${guest.selfPick ? '顾客自选' : '店主配货'}</small></header>
       ${lines.map(renderReceiptLine).join('') || '<p class="receipt-empty">从货架添加商品</p>'}
-      <div class="receipt-totals"><span>合计</span><strong id="receipt-total">¥${total}</strong>
-        <small id="receipt-budget" class="${over ? 'over-budget' : ''}">${over ? '超出预算 ¥' + (total - guest.cap) : '预算余 ¥' + (guest.cap - total)}</small></div>
+      <div class="receipt-totals"><span>合计</span><strong id="receipt-total"></strong>
+        <small id="receipt-savings"></small><small id="receipt-budget"></small></div>
       <div class="trade-actions">
         <button class="btn gold" ${lines.length ? '' : 'disabled'}>确认结账</button>
+        <button id="receipt-discount" type="button" class="btn receipt-discount" aria-pressed="${!!guest.discounted}" onclick="toggleReceiptDiscount()">${guest.discounted ? '取消九折' : '整单 −10%'}</button>
         ${guest.creditAsk && lines.length ? '<button class="btn" type="submit" formaction="#" onclick="event.preventDefault(); if (this.form.reportValidity()) settleBuyerSale(true)">记赊账</button>' : ''}
       </div>
     </form>
   </div>`;
+  updateReceipt(guest);
 }
 
 function renderBuyerOptions(title, stocks, guest) {
@@ -1461,7 +1557,7 @@ function showSettlement(s) {
     <b>🧾 其他收支（小计 ${s.otherTotal >= 0 ? '+' : ''}¥${s.otherTotal}）</b><table>${others}</table>
     <p>白天进货支出 ¥${s.daytimeSpend}</p>
     <p style="font-size:16px;">今日净变化：<b class="${s.net >= 0 ? 'plus' : 'minus'}">${s.net >= 0 ? '+' : ''}¥${s.net}</b>｜当前资金 <b>¥${state.money}</b>｜口碑 ${state.rep}</p>
-    <button class="btn primary" onclick="nextDay()" style="margin-top:10px;">☀️ 明天开店</button>`;
+    <button class="btn primary" onclick="nextDay()" style="margin-top:10px;">☀️ 进入明天</button>`;
   $('#modal-mask').classList.remove('hidden');
 }
 
@@ -1471,12 +1567,13 @@ function resetGame() {
   localStorage.removeItem(CONFIG.saveKey);
   state = newState();
   addLog('新店开业！口袋里有 ¥250，目标是攒够 ¥3000 盘下店面。');
-  startDay();
+  prepareDay();
   renderAll(); save();
 }
 
 document.querySelectorAll('#tabs .tab').forEach((b) =>
   b.addEventListener('click', () => { currentTab = b.dataset.tab; renderTabs(); }));
+$('#btn-openday').addEventListener('click', startDay);
 $('#btn-endday').addEventListener('click', endDay);
 $('#guest-call').addEventListener('click', () => {
   if (!state.current || state.settlement) return;
@@ -1540,9 +1637,9 @@ state = load();
 if (!state) {
   state = newState();
   addLog('新店开业！口袋里有 ¥250，目标是攒够 ¥3000 盘下店面。');
-  startDay();
+  prepareDay();
 }
-if (!state.settlement && (!state.current && state.queue.length || state.current?.type === 'buyer' && !state.current.receipt)) {
+if (state.shopOpen && !state.settlement && (!state.current && state.queue.length || state.current?.type === 'buyer' && !state.current.receipt)) {
   if (state.current?.type === 'buyer') state.queue.unshift({ type: 'buyer' });
   nextVisitor();
 }

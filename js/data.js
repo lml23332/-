@@ -19,6 +19,14 @@ const CONFIG = {
   buyersGuaranteed: 3,      // 货架有货时，每日基础买家数
   standardTradeMax: 75,
   counterSlots: 6,
+  openingHours: [
+    { served: 0, hour: 8, light: 'morning' },
+    { served: .2, hour: 12, light: 'noon' },
+    { served: .4, hour: 14, light: 'afternoon' },
+    { served: .6, hour: 16, light: 'sunset' },
+    { served: .8, hour: 18, light: 'night' },
+    { served: 1, hour: 20, light: 'night' },
+  ],
   reputation: { min: -100, max: 100, visitsPerPoint: 4, dailyLossLimit: 3, failedBidLoss: 1 },
   retail: {
     buyerCount: [1, 8],
@@ -32,6 +40,11 @@ const CONFIG = {
     conditionCheckChance: .40,
     conditionPenalty: 2,
     clearanceMultiplier: .75,
+    receiptDiscount: .9,
+    discountBudgetBoost: 2,
+    roundOffAmount: 1,
+    courtesyReputation: 1,
+    courtesyFavor: 1,
     maxUnitPrice: 9999,
   },
 

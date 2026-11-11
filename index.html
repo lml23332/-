@@ -51,7 +51,8 @@
       <span class="stat goal" id="stat-goal">🎯 盘下店面 ¥250 / ¥3000</span>
     </div>
     <div class="top-actions">
-      <button id="btn-endday" class="btn primary">🌙 收摊结算</button>
+      <button id="btn-openday" class="btn gold">开店</button>
+      <button id="btn-endday" class="btn primary hidden">🌙 收摊结算</button>
       <button id="music-toggle" class="btn" aria-label="背景音乐" aria-pressed="false">音乐</button><label class="volume-control">音量 <input id="music-volume" type="range" min="0" max="100" value="70"></label><button id="open-title" class="btn">主菜单</button>
     </div>
   </header>
@@ -67,10 +68,10 @@
   </section>
   <main>
     <section class="shop" aria-label="小卖部售货窗口">
-      <div class="street">
+      <div class="street" data-light="morning">
         <div class="walkers" aria-hidden="true">
-          <span class="walker"><i class="person"></i></span>
-          <span class="walker walker-second"><i class="person"></i></span>
+          <span class="walker"><i class="person"><i class="walker-leg"></i><i class="walker-leg back"></i></i></span>
+          <span class="walker walker-second"><i class="person"><i class="walker-leg"></i><i class="walker-leg back"></i></i></span>
         </div>
         <button type="button" id="guest-call" class="guest-call hidden" aria-controls="counter trade-dialogue" aria-expanded="false">
           <span id="portrait-frame" class="portrait-frame" aria-hidden="true"></span>
@@ -97,7 +98,7 @@
           </div>
         </aside>
         <div id="street-status" class="street-status" role="status">
-          <i aria-hidden="true"></i><span><strong></strong><small></small></span>
+          <time id="shop-clock" datetime="08:00">08:00</time><span><strong></strong><small></small></span>
         </div>
         <section class="display" aria-label="桌板陈列">
           <div class="counter-zone shelf-zone" aria-label="货架陈列格">
