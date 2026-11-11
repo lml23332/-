@@ -406,6 +406,7 @@ function fillSelfPickedReceipt(guest, stock) {
   }
   guest.line = guest.receipt.length ? '我挑好了这些，你帮我结一下。预算 ¥' + guest.cap + '。'
     : '我带了 ¥' + guest.cap + '，能帮我挑几样吗？';
+  guest.selfPick = guest.receipt.length > 0;
 }
 
 function enqueueBuyers() {
@@ -594,9 +595,11 @@ function receiptQuote(guest) {
 }
 
 function buyerReply(guest, quote) {
-  if (quote.discount) return '整单打九折呀！我再拿 ¥' + CONFIG.retail.discountBudgetBoost + '，预算一共 ¥' + quote.budget + '。';
-  if (quote.roundOff) return '就差 ¥' + quote.roundOff + '，能帮我抹个零吗？';
-  return '';
+  const replies = [];
+  if (guest.upsellReply) replies.push(guest.upsellReply);
+  if (quote.discount) replies.push('整单打九折呀！我再拿 ¥' + CONFIG.retail.discountBudgetBoost + '，预算一共 ¥' + quote.budget + '。');
+  if (quote.roundOff) replies.push('就差 ¥' + quote.roundOff + '，能帮我抹个零吗？');
+  return replies.join(' ');
 }
 
 function updateReceipt(guest) {
@@ -631,7 +634,7 @@ function editReceipt(uid, action) {
   if (guest?.type !== 'buyer' || state.settlement) return;
   const row = guest.receipt.find(entry => entry.uid === uid);
   const stock = counterInventory().find(entry => entry.uid === uid);
-  if (action === 'add' && stock && retailAvailable(stock) && !row) {
+  if (action === 'add' && !guest.selfPick && stock && retailAvailable(stock) && !row) {
     guest.receipt.push({ uid, price: counterPrice(stock) });
   } else if (action === 'remove' && row) {
     guest.receipt = guest.receipt.filter(entry => entry !== row);
@@ -639,6 +642,47 @@ function editReceipt(uid, action) {
     row.upgraded = !row.upgraded;
   }
   renderVisitor(); save();
+}
+
+function canRecommend(guest) {
+  return guest.selfPick && !guest.upsold && guest.regularId &&
+    getRegular(guest.regularId).favor >= CONFIG.retail.upsellFavor;
+}
+
+function recommendStock(uid) {
+  const guest = state.current;
+  if (guest?.type !== 'buyer' || state.settlement || !canRecommend(guest)) return;
+  const stock = counterInventory().find(entry => entry.uid === uid);
+  if (!stock || !retailAvailable(stock) || guest.receipt.some(row => row.uid === uid)) return;
+  const row = { uid, price: counterPrice(stock) };
+  const quote = receiptQuote({ ...guest, receipt: [...guest.receipt, row] });
+  if (quote.total > quote.budget) {
+    guest.upsellReply = '这件先不加啦，钱不够。';
+  } else {
+    guest.upsellReply = '好，再帮我加一件' + itemById(stock.itemId).name + '。';
+    guest.upsold = true;
+    guest.receipt.push(row);
+  }
+  renderVisitor(); save();
+}
+
+function allocateReceipt(lines, quote) {
+  let running = 0;
+  let allocated = 0;
+  return lines.map(line => {
+    running += line.row.price;
+    const share = quote.subtotal ? Math.round(quote.total * running / quote.subtotal) : 0;
+    const revenue = share - allocated;
+    allocated = share;
+    return { ...line, revenue };
+  });
+}
+
+function acceptablePrice(stock) {
+  const tolerance = CONFIG.retail.priceTolerance;
+  const quality = stock.grilled ? grillStage(stock).key : stockCondition(stock);
+  const multiplier = stock.variant === 'real' ? tolerance[quality] || tolerance.standard : tolerance.standard;
+  return Math.floor(counterPrice(stock) * multiplier);
 }
 
 function editReceiptPrice(uid, input) {
@@ -671,14 +715,16 @@ function settleBuyerSale(onCredit = false) {
   const guest = state.current;
   if (guest?.type !== 'buyer' || state.settlement || !guest.receipt.length) return;
   if (onCredit && (!guest.creditAsk || !serviceAvailable('ledger'))) return;
-  const lines = receiptLines(guest);
-  if (lines.length !== guest.receipt.length || lines.some(({ stock }) => !retailAvailable(stock))) return notifyPlayer('小票里的库存有变动，请重新选货。');
   const quote = receiptQuote(guest);
+  const lines = allocateReceipt(receiptLines(guest), quote);
+  if (lines.length !== guest.receipt.length || lines.some(({ stock }) => !retailAvailable(stock))) return notifyPlayer('小票里的库存有变动，请重新选货。');
   const { total } = quote;
   if (onCredit && total === 0) return notifyPlayer('小票合计为零，可以直接结账。');
   if (total > quote.budget) return notifyPlayer('小票超过顾客预算，可以打折、减价或删掉商品。');
   const mismatch = receiptObjection(guest, lines);
   if (mismatch) return notifyPlayer(guest.name + '：' + mismatch);
+  const overpriced = lines.find(({ stock, revenue }) => revenue > acceptablePrice(stock));
+  if (overpriced) return notifyPlayer(guest.name + '：' + overpriced.item.name + '这个价有点高，能便宜些吗？');
   for (const { row, stock, item } of lines) {
     const relabelled = row.upgraded || stock.relabelled;
     const caught = row.upgraded && Math.random() < CONFIG.retail.conditionCheckChance;
@@ -702,22 +748,19 @@ function settleBuyerSale(onCredit = false) {
   } else {
     state.money += total;
     if (total > 0) state.progress.sales++;
-    let running = 0;
-    let allocated = 0;
-    for (const { row, stock, item } of lines) {
-      running += row.price;
-      const share = quote.subtotal ? Math.round(total * running / quote.subtotal) : 0;
-      const revenue = share - allocated;
-      allocated = share;
+    for (const { stock, item, revenue } of lines) {
       state.daySales.push({ itemId: item.id, label: guest.name + ' 买走' + item.name, revenue, profit: revenue - stock.cost });
     }
     addLog(`${label}，实收 ¥${total}。`);
   }
   const discount = total < lines.reduce((sum, { stock }) => sum + counterPrice(stock), 0);
+  const fresh = lines.some(({ stock, revenue }) => revenue > 0 && stockCondition(stock) === 'fresh');
+  const courtesy = quote.discount || quote.roundOff;
   if (total > 0) countGoodVisit();
-  if (guest.regularId) addFavor(guest.regularId, (discount ? 2 : 1) + (quote.discount || quote.roundOff ? CONFIG.retail.courtesyFavor : 0));
-  if (quote.discount || quote.roundOff) {
-    changeReputation(CONFIG.retail.courtesyReputation);
+  const bonus = (courtesy ? CONFIG.retail.courtesyFavor : 0) + (fresh ? CONFIG.retail.freshSaleFavor : 0);
+  if (guest.regularId) addFavor(guest.regularId, (discount ? 2 : 1) + bonus);
+  if (fresh || courtesy) changeReputation((fresh ? CONFIG.retail.freshSaleReputation : 0) + (courtesy ? CONFIG.retail.courtesyReputation : 0));
+  if (courtesy) {
     finishVisit();
     notifyPlayer(guest.name + (quote.roundOff ? '：谢谢你帮我抹零！' : '：谢谢你给我打折！'));
     return;
@@ -1233,9 +1276,9 @@ function renderVisitor() {
 function renderDialogue(guest, role, lines) {
   const frame = $('#portrait-frame');
   const identity = guest.portraitName || guest.name;
-  const column = PORTRAITS[identity];
-  frame.dataset.portrait = identity === '快递小哥' ? 'courier' : Number.isInteger(column) ? String(column) : 'fallback';
-  frame.textContent = Number.isInteger(column) ? '' : guest.avatar;
+  const portrait = identity === '快递小哥' ? 'courier' : PORTRAITS[identity];
+  frame.dataset.portrait = portrait == null ? 'fallback' : String(portrait);
+  frame.textContent = portrait == null ? guest.avatar : '';
   $('#trade-dialogue').innerHTML = `<header><strong>${esc(guest.name)}</strong><span>${role}</span></header>
     ${lines.map(line => '<p>' + esc(line) + '</p>').join('')}`;
 }
@@ -1341,14 +1384,16 @@ function renderBuyer(guest, area, act) {
     <div class="checkout-stock">
       <p class="buyer-request">${guest.line}</p>
       <p id="buyer-reply" class="buyer-request hidden"></p>
-      ${renderBuyerOptions('货架', regular, guest)}
-      ${clearance.length ? renderBuyerOptions('临期促销区', clearance, guest) : ''}
-      ${grilled.length ? renderBuyerOptions('现烤热食', grilled, guest) : ''}
+      ${guest.selfPick
+        ? canRecommend(guest) ? renderBuyerOptions('推荐加购', available, guest) : ''
+        : renderBuyerOptions('货架', regular, guest) +
+          (clearance.length ? renderBuyerOptions('临期促销区', clearance, guest) : '') +
+          (grilled.length ? renderBuyerOptions('现烤热食', grilled, guest) : '')}
       <button type="button" class="btn small" onclick="buyerRefuse()">结束接待</button>
     </div>
     <form class="receipt" onsubmit="event.preventDefault(); settleBuyerSale()">
       <header><strong>购物小票</strong><small>第 ${state.day} 天 · ${guest.selfPick ? '顾客自选' : '店主配货'}</small></header>
-      ${lines.map(renderReceiptLine).join('') || '<p class="receipt-empty">从货架添加商品</p>'}
+      ${lines.map(renderReceiptLine).join('') || '<p class="receipt-empty">小票里没有商品</p>'}
       <div class="receipt-totals"><span>合计</span><strong id="receipt-total"></strong>
         <small id="receipt-savings"></small><small id="receipt-budget"></small></div>
       <div class="trade-actions">
@@ -1362,10 +1407,12 @@ function renderBuyer(guest, area, act) {
 }
 
 function renderBuyerOptions(title, stocks, guest) {
+  const action = guest.selfPick ? '推荐' : '添加';
   const tiles = stocks.map(stock => {
     const product = itemById(stock.itemId);
     const wanted = stock.itemId === guest.wantedItem;
-    return `<button type="button" class="stock-tile" onclick="editReceipt(${stock.uid},'add')" aria-label="添加${product.name}，${(stock.grilled ? grillStage(stock) : CONDITION[stockCondition(stock)]).name}，¥${counterPrice(stock)}">
+    const handler = guest.selfPick ? `recommendStock(${stock.uid})` : `editReceipt(${stock.uid},'add')`;
+    return `<button type="button" class="stock-tile" onclick="${handler}" aria-label="${action}${product.name}，${(stock.grilled ? grillStage(stock) : CONDITION[stockCondition(stock)]).name}，¥${counterPrice(stock)}">
       ${itemArtwork(product.id)}<span>${product.name}${wanted ? ' · 点名' : ''}</span>
       ${conditionBadge(stock)}<small>+ ¥${counterPrice(stock)}</small></button>`;
   }).join('');

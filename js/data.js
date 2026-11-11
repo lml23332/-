@@ -36,6 +36,10 @@ const CONFIG = {
     selfPickChance: .45,
     selfPickCount: [1, 3],
     specificChance: .35,
+    upsellFavor: 4,
+    freshSaleFavor: 1,
+    freshSaleReputation: 1,
+    priceTolerance: { standard: 1.2, fresh: 1.5, mint: 1.65, bloom: 1.5 },
     conditionChance: .35,
     conditionCheckChance: .40,
     conditionPenalty: 2,
@@ -118,6 +122,9 @@ const BUYERS = [
   { name: '来接孩子的爸爸', avatar: '👨', line: '孩子闹着要，给我拿那个。' },
   { name: '怀旧的年轻人', avatar: '🧑', line: '哎哟，这可是我小时候的梦。' },
   { name: '精打细算的阿姨', avatar: '👩‍🦰', line: '这件多少钱？合适我就拿了。' },
+  { name: '来买文具的女生', avatar: '👧', line: '我来看看今天有什么。' },
+  { name: '刚打完球的学生', avatar: '🏀', line: '打完球想买点吃的。' },
+  { name: '修车的许师傅', avatar: '🧰', line: '刚忙完，来看看。' },
 ];
 const COLLECTOR = { name: '神秘收藏家', avatar: '🕶️', line: '听说你这儿有好货，我专程来的。钱不是问题，要真东西。' };
 
@@ -419,10 +426,13 @@ const WHOLESALE_MARKET = {
 
 // 按立绘图集从左到右的列编号。未单独绘制的角色复用同类立绘。
 const PORTRAITS = {
-  '初中生阿凯': 0, '小豆包': 0, '放学的小学生': 0, '快递小哥': 0, '强子': 0,
+  '初中生阿凯': 0, '放学的小学生': 0, '背书包的学生': 0,
   '桂芬婶': 1, '买菜路过的大姐': 1, '精打细算的阿姨': 1,
-  '老周': 2, '孙大爷': 2, '遛弯的刘叔': 2, '来接孩子的爸爸': 2, '神秘收藏家': 2,
-  '豆豆妈': 3, '隔壁班女生': 3, '怀旧的年轻人': 0,
+  '老周': 2, '神秘收藏家': 2,
+  '豆豆妈': 3, '怀旧的年轻人': 3,
+  '小豆包': 4, '来接孩子的爸爸': 5, '孙大爷': 6,
+  '隔壁班女生': 7, '来买文具的女生': 7, '放学的学生': 7,
+  '刚打完球的学生': 8, '强子': 9, '遛弯的刘叔': 9, '修车的许师傅': 9,
 };
 
 // 图集上的部位坐标，按单面图片的百分比定位。

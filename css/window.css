@@ -242,6 +242,18 @@ main { grid-template-columns: minmax(0, 2.6fr) minmax(250px, 1fr); gap: 14px; al
 .portrait-frame[data-portrait="1"] { background-position: 33.3333% 50%; }
 .portrait-frame[data-portrait="2"] { background-position: 66.6667% 50%; }
 .portrait-frame[data-portrait="3"] { background-position: 100% 50%; }
+.portrait-frame:is([data-portrait="4"], [data-portrait="5"], [data-portrait="6"], [data-portrait="7"], [data-portrait="8"], [data-portrait="9"]) {
+  width: clamp(100px, 25cqw, 240px);
+  aspect-ratio: 3 / 4;
+  background-image: url("../assets/customer-portraits-extra.png");
+  background-size: 300% 200%;
+}
+.portrait-frame[data-portrait="4"] { background-position: 0 0; }
+.portrait-frame[data-portrait="5"] { background-position: 50% 0; }
+.portrait-frame[data-portrait="6"] { background-position: 100% 0; }
+.portrait-frame[data-portrait="7"] { background-position: 0 100%; }
+.portrait-frame[data-portrait="8"] { background-position: 50% 100%; }
+.portrait-frame[data-portrait="9"] { background-position: 100% 100%; }
 .portrait-frame[data-portrait="fallback"] {
   display: grid;
   place-items: center;
@@ -928,7 +940,7 @@ main { grid-template-columns: minmax(0, 1fr); }
   position: absolute;
   z-index: 4;
   top: 29%;
-  left: 9%;
+  right: 9%;
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
