@@ -991,6 +991,40 @@ main { grid-template-columns: minmax(0, 1fr); }
 #unlock-guide summary { color: #ffdfa0; cursor: pointer; font-weight: 700; }
 #unlock-guide p { margin-top: 4px; }
 #unlock-guide .trade-actions { margin-top: 6px; }
+
+#guide-arrow {
+  position: fixed;
+  z-index: 30;
+  transform: translate(-50%, calc(-100% - 12px));
+  pointer-events: none;
+  width: max-content;
+  max-width: 134px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: #ffe19b;
+  color: #30231c;
+  font-weight: 700;
+  font-size: .82rem;
+  text-align: center;
+  box-shadow: 0 3px 8px #1b140f99;
+}
+#guide-arrow::after {
+  content: "";
+  position: absolute;
+  left: calc(50% - 9px);
+  top: 100%;
+  border: 9px solid transparent;
+  border-top-color: #ffe19b;
+}
+#guide-arrow[data-side="below"] { transform: translate(-50%, 12px); }
+#guide-arrow[data-side="below"]::after {
+  top: auto;
+  bottom: 100%;
+  border-top-color: transparent;
+  border-bottom-color: #ffe19b;
+}
+.guided-target { outline: 2px solid #ffe19b; outline-offset: 3px; }
+
 .settlement-total { font-size: 1.2rem; }
 .settlement-details { display: grid; gap: 6px; margin-top: 12px; }
 .settlement-details summary { cursor: pointer; }
