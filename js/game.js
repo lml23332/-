@@ -24,6 +24,9 @@ let inspectionFace = 0;
 let inspectedPart = null;
 let noticeTimer;
 let viewedShelfUid = null;
+let guideFrame = null;
+let guideTarget = null;
+let guideKey = '';
 
 function newState() {
   return {
@@ -45,6 +48,7 @@ function newState() {
     clockServed: 0,
     guide: true,
     seenTutorials: [],
+    guidedLessons: [],
     openingMoney: CONFIG.startMoney,
     settlement: null,
     money: CONFIG.startMoney,
@@ -124,6 +128,14 @@ function load() {
       s.shopOpen = !!(s.settlement || s.current || s.queue?.length || s.wholesaleOrders?.length || s.daySales?.length);
     }
     if (!s.seenTutorials && (s.day > 1 || s.shopOpen)) s.seenTutorials = ['opening'];
+    if (!s.guidedLessons) {
+      // 旧档只为更新之后新开放的功能显示箭头。
+      s.guidedLessons = TUTORIALS.filter(({ unlock }) => {
+        const milestone = MILESTONES[unlock];
+        return milestone && (s.progress.kept.includes(unlock) ||
+          (s.progress.sales >= milestone[0] && s.progress.days >= milestone[1]));
+      }).map(lesson => lesson.id);
+    }
     return Object.assign(newState(), { started: true, guide: false }, s); // 用默认值兜底新字段，保证老存档可续
   } catch (e) { return null; }
 }
@@ -1091,6 +1103,80 @@ function renderAll() {
   renderWindow();
   renderTabs();
   renderLog();
+  scheduleGuideArrow();
+}
+
+function openingArrow() {
+  if (!state.guide || state.day !== 1) return null;
+  if (!state.shopOpen) {
+    if (state.shelf.length) return { target: '#btn-openday', hint: '备好货了，点这里开店' };
+    return { target: '[data-order="wh-noodles"]:enabled', via: '#open-wholesale', hint: '先进一批干脆面' };
+  }
+  const guest = state.current;
+  if (!guest) return { target: '#btn-endday', hint: '顾客接待完了，点这里收摊' };
+  if (state.daySales.length || guest.type !== 'buyer') return null;
+  if (!tradeOpen) return { target: '#guest-call', hint: '点顾客开始接待' };
+  if (!state.shelf.length) return { target: '[data-order="wh-noodles"]:enabled', via: '#open-wholesale', hint: '先进一批干脆面' };
+  if (!guest.receipt.length) return { target: '#action-area .buyer-options button', hint: '点商品加入小票' };
+  return { target: '#receipt-confirm', hint: '核对小票后结账' };
+}
+
+function findGuideTarget() {
+  if (!state.started || state.settlement || $('dialog[open]')) return null;
+  const visible = selector => {
+    const element = selector && $(selector);
+    return element?.getClientRects().length ? element : null;
+  };
+  const steps = [];
+  const opening = openingArrow();
+  if (opening) steps.push(opening);
+  for (const lesson of TUTORIALS) {
+    const rule = TUTORIAL_ARROWS[lesson.id];
+    if (!rule || !serviceAvailable(lesson.unlock) || state.guidedLessons.includes(lesson.id)) continue;
+    if (tradeOpen && !['clearance', 'receiving', 'premium'].includes(lesson.id)) continue;
+    if (lesson.id === 'premium' && !(state.current?.type === 'seller' && state.current.ask > CONFIG.standardTradeMax)) continue;
+    steps.push({ ...rule, lesson: lesson.id });
+  }
+  for (const step of steps) {
+    const target = visible(step.target);
+    if (target) return { element: target, key: step.target, hint: step.hint, lesson: step.lesson };
+    const entrance = visible(step.via);
+    if (entrance) return { element: entrance, key: step.via, hint: step.hint };
+  }
+  return null;
+}
+
+function renderGuideArrow() {
+  guideFrame = null;
+  const arrow = $('#guide-arrow');
+  const target = findGuideTarget();
+  guideTarget?.element.classList.remove('guided-target');
+  guideTarget = target;
+  if (!target) {
+    guideKey = '';
+    arrow.classList.add('hidden');
+    return;
+  }
+  const { element, key, hint } = target;
+  let bounds = element.getBoundingClientRect();
+  if (key !== guideKey && (bounds.top < 0 || bounds.bottom > window.innerHeight)) {
+    element.scrollIntoView({ block: 'center', inline: 'nearest' });
+    bounds = element.getBoundingClientRect();
+  }
+  guideKey = key;
+  const onScreen = bounds.bottom > 0 && bounds.top < window.innerHeight;
+  arrow.classList.toggle('hidden', !onScreen);
+  if (!onScreen) return;
+  const below = bounds.top < 72;
+  arrow.dataset.side = below ? 'below' : 'above';
+  arrow.style.left = clamp(bounds.left + bounds.width / 2, 70, window.innerWidth - 70) + 'px';
+  arrow.style.top = (below ? bounds.bottom : bounds.top) + 'px';
+  arrow.firstElementChild.textContent = hint;
+  element.classList.add('guided-target');
+}
+
+function scheduleGuideArrow() {
+  if (guideFrame == null) guideFrame = requestAnimationFrame(renderGuideArrow);
 }
 
 function renderTutorials() {
@@ -1108,9 +1194,11 @@ function acknowledgeTutorial(id, openTab = false) {
   const lesson = TUTORIALS.find(entry => entry.id === id);
   if (!lesson || !serviceAvailable(lesson.unlock)) return;
   if (!state.seenTutorials.includes(id)) state.seenTutorials.push(id);
+  if (!openTab && !state.guidedLessons.includes(id)) state.guidedLessons.push(id);
   save();
   renderTutorials();
   if (openTab && lesson.tab) openManagement(lesson.tab);
+  scheduleGuideArrow();
 }
 
 function renderGuide() {
@@ -1420,7 +1508,7 @@ function renderBuyer(guest, area, act) {
       ${guest.wantedItem && guest.receipt.length ? '' : guest.selfPick
         ? canRecommend(guest) ? renderBuyerOptions('推荐加购', available, guest) : ''
         : renderBuyerOptions('货架', regular, guest) +
-          (clearance.length ? renderBuyerOptions('临期促销区', clearance, guest) : '') +
+          (clearance.length ? renderBuyerOptions('临期促销区', clearance, guest, 'clearance') : '') +
           (grilled.length ? renderBuyerOptions('现烤热食', grilled, guest) : '')}
       <button type="button" class="btn small" onclick="buyerRefuse()">结束接待</button>
     </div>
@@ -1430,7 +1518,7 @@ function renderBuyer(guest, area, act) {
       <div class="receipt-totals"><span>合计</span><strong id="receipt-total"></strong>
         <small id="receipt-savings"></small><small id="receipt-budget"></small></div>
       <div class="trade-actions">
-        <button class="btn gold" ${lines.length ? '' : 'disabled'}>确认结账</button>
+        <button id="receipt-confirm" class="btn gold" ${lines.length ? '' : 'disabled'}>确认结账</button>
         <button id="receipt-discount" type="button" class="btn receipt-discount" aria-pressed="${!!guest.discounted}" onclick="toggleReceiptDiscount()">${guest.discounted ? '取消九折' : '整单 −10%'}</button>
         ${guest.creditAsk && lines.length ? '<button class="btn" type="submit" formaction="#" onclick="event.preventDefault(); if (this.form.reportValidity()) settleBuyerSale(true)">记赊账</button>' : ''}
       </div>
@@ -1439,7 +1527,7 @@ function renderBuyer(guest, area, act) {
   updateReceipt(guest);
 }
 
-function renderBuyerOptions(title, stocks, guest) {
+function renderBuyerOptions(title, stocks, guest, guide = '') {
   const action = guest.selfPick ? '推荐' : '添加';
   const tiles = stocks.map(stock => {
     const product = itemById(stock.itemId);
@@ -1449,7 +1537,7 @@ function renderBuyerOptions(title, stocks, guest) {
       ${itemArtwork(product.id)}<span>${product.name}${wanted ? ' · 点名' : ''}</span>
       ${conditionBadge(stock)}<small>+ ¥${counterPrice(stock)}</small></button>`;
   }).join('');
-  return `<section class="checkout-options"><h3>${title}</h3>${tiles ? '<div class="buyer-options">' + tiles + '</div>' : '<p>暂无可添加的商品</p>'}</section>`;
+  return `<section class="checkout-options" data-guide="${guide}"><h3>${title}</h3>${tiles ? '<div class="buyer-options">' + tiles + '</div>' : '<p>暂无可添加的商品</p>'}</section>`;
 }
 
 function renderReceiptLine({ row, stock, item }) {
@@ -1493,7 +1581,7 @@ function tabWholesale() {
     return `<div class="card">
       <div class="row"><span>${itemPreviewButton(product.id, true)} <b>${product.name}</b></span><span>每批 ${product.pack} 件</span></div>
       <div class="mut">进价 ¥${cost} / 件 · 参考零售价 ¥${product.value} / 件${change}</div>
-      <button class="btn small gold display-toggle" onclick="orderWholesale('${product.id}')" ${disabled ? 'disabled' : ''}>${label}</button>
+      <button class="btn small gold display-toggle" data-order="${product.id}" onclick="orderWholesale('${product.id}')" ${disabled ? 'disabled' : ''}>${label}</button>
     </div>`;
   }).join('');
   const equipment = !serviceAvailable('grill') ? '' : state.grill.owned
@@ -1501,7 +1589,7 @@ function tabWholesale() {
       <b>${food.name}</b> · 每批 ${food.pack} 串 · 冷冻库存 ${state.grill.supplies[food.id] || 0}
       <button class="btn small gold" onclick="orderGrillFood('${food.id}')" ${state.settlement || state.wholesaleOrders.includes(food.id) ? 'disabled' : ''}>进货 ¥${food.cost * food.pack}</button></div>`).join('')
     : `<div class="card"><b>烤肠机</b> · ${GRILL.capacity} 个烤位
-      <button class="btn gold" onclick="buyGrill()" ${state.settlement ? 'disabled' : ''}>购置 ¥${GRILL.cost}</button></div>`;
+      <button id="buy-grill" class="btn gold" onclick="buyGrill()" ${state.settlement ? 'disabled' : ''}>购置 ¥${GRILL.cost}</button></div>`;
   return '<p class="mut">每种商品每天限订一批，立即到货。</p>' + products + equipment;
 }
 
@@ -1671,6 +1759,18 @@ function resetGame() {
 
 document.querySelectorAll('#tabs .tab').forEach((b) =>
   b.addEventListener('click', () => { currentTab = b.dataset.tab; renderTabs(); }));
+document.addEventListener('click', event => {
+  const target = guideTarget;
+  if (target?.lesson && target.element.contains(event.target) && !state.guidedLessons.includes(target.lesson)) {
+    state.guidedLessons.push(target.lesson);
+    save();
+  }
+  scheduleGuideArrow();
+}, true);
+document.addEventListener('close', scheduleGuideArrow, true);
+document.addEventListener('toggle', scheduleGuideArrow, true);
+window.addEventListener('resize', scheduleGuideArrow);
+window.addEventListener('scroll', scheduleGuideArrow, { passive: true });
 $('#btn-openday').addEventListener('click', startDay);
 $('#btn-endday').addEventListener('click', endDay);
 $('#guest-call').addEventListener('click', () => {

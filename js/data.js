@@ -522,6 +522,19 @@ const TUTORIALS = [
   { id: 'premium', unlock: 'premium', title: '开始交易高价货', text: '开店后可能遇到带贵重物件的卖家。收购前记得验货，并留够现金交租。洞洞板也多了高价大奖可选。' },
   { id: 'grill', unlock: 'grill', title: '用烤肠机做热食', tab: 'wholesale', action: '看烤肠机', text: '先从供货商买烤肠机，再订烤肠或丸子串。放上烤位后，每送走一位顾客推进一次火候。熟了或开花时可加到小票，未解冻和烤糊的不能卖。' },
 ];
+// target 是要点击的操作，via 用于入口尚未展开时。
+const TUTORIAL_ARROWS = {
+  organizer: { target: '#shop-organizer', hint: '点小梁了解宣传' },
+  marbles: { target: '[data-order="danzhu"]:enabled', via: '#open-wholesale', hint: '看看新到的玻璃弹珠' },
+  clearance: { target: '[data-guide="clearance"] button', hint: '看看临期促销商品' },
+  poke: { target: '#open-poke', hint: '打开洞洞板' },
+  harmonica: { target: '[data-order="kouqin"]:enabled', via: '#open-wholesale', hint: '看看新到的口琴' },
+  receiving: { target: '.inspection-marker:enabled', hint: '点击标记查看验货线索' },
+  ledger: { target: '[data-tab="ledger"]', via: '#side > summary', hint: '打开赊账本' },
+  sticker: { target: '[data-tab="sticker"]', via: '#side > summary', hint: '打开集贴纸活动' },
+  premium: { target: '#bidInput', hint: '验货后填写你的报价' },
+  grill: { target: '#buy-grill:enabled', via: '#open-wholesale', hint: '看看供货商的烤肠机' },
+};
 const NEIGHBORS = {
   mentor: { name: '邻居林姨', line: '先向供货商进货，再给放学的顾客结账。柜台卖得越多，能做的生意也会慢慢多起来。' },
   organizer: { name: '社区小梁', line: '我能帮你在街坊群里宣传，今天多来两位买家。', cost: 18, extraBuyers: 2 },
