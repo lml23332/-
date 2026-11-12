@@ -15,6 +15,8 @@ const itemById = (id) => ITEMS.find((i) => i.id === id) || WHOLESALE.find((i) =>
 const regularById = (id) => REGULARS.find((r) => r.id === id);
 let uidSeq = 1;
 const nextUid = () => Date.now() * 100 + (uidSeq++ % 100);
+// 正式发布前改为 false；开发测试入口与强制事件会整体关闭。
+const DEV_MODE = true;
 
 /* ---------------- 游戏状态 ---------------- */
 let state = null;
@@ -27,6 +29,9 @@ let viewedShelfUid = null;
 let guideFrame = null;
 let guideTarget = null;
 let guideKey = '';
+let cashFeedbackTimer;
+let receiptZoom = 1;
+let receiptCollapsed = false;
 
 function newState() {
   return {
@@ -136,6 +141,7 @@ function load() {
           (s.progress.sales >= milestone[0] && s.progress.days >= milestone[1]));
       }).map(lesson => lesson.id);
     }
+    if (s.current?.type === 'buyer') prepareBuyerState(s.current);
     return Object.assign(newState(), { started: true, guide: false }, s); // 用默认值兜底新字段，保证老存档可续
   } catch (e) { return null; }
 }
@@ -163,6 +169,34 @@ function countGoodVisit(points = 1) {
 
 function itemCategory(item) {
   return FOOD_LIFE[item.id] ? '食品' : item.cat || '文具';
+}
+
+function shopCategory(item) {
+  const fine = itemCategory(item);
+  return SHOP_CATEGORIES.find(category => category.cats.includes(fine)) || SHOP_CATEGORIES[2];
+}
+
+function buyerProfileId(person = {}) {
+  if (person.profile && BUYER_PROFILES[person.profile]) return person.profile;
+  const name = person.portraitName || person.name || '';
+  if (/小学生|豆包/.test(name)) return 'child';
+  if (/阿姨|婶|大姐|妈妈|妈$/.test(name)) return 'auntie';
+  if (/年轻|强子/.test(name)) return 'youngMan';
+  if (/学生|女生/.test(name)) return 'student';
+  if (/老|爷|叔/.test(name)) return 'elder';
+  return 'adult';
+}
+
+function prepareBuyerState(guest) {
+  if (!guest || guest.type !== 'buyer') return guest;
+  guest.profile = buyerProfileId(guest);
+  const profile = BUYER_PROFILES[guest.profile];
+  if (!Number.isInteger(guest.maxHaggleRounds)) guest.maxHaggleRounds = randInt(...profile.rounds);
+  if (typeof guest.bargainTarget !== 'number') guest.bargainTarget = rand(profile.target[0], profile.target[1]);
+  if (typeof guest.willHaggle !== 'boolean') guest.willHaggle = Math.random() < profile.haggleChance;
+  if (!Number.isInteger(guest.haggleRound)) guest.haggleRound = 0;
+  if (!guest.categoryFilter) guest.categoryFilter = guest.wantedCategory || 'all';
+  return guest;
 }
 
 function wholesaleQuote(product) {
@@ -292,7 +326,9 @@ function openNeighborhood(role) {
 
 function closeNeighborhood() {
   state.neighborTalk = null;
-  showNewNeighbor();
+  // 街坊说明让位给正式接待；队列清空后再提示尚未见过的新街坊。
+  if (state.current) state.neighborTalk = null;
+  else showNewNeighbor();
   renderNeighborhood(); save();
 }
 
@@ -374,33 +410,44 @@ function makeSeller() {
   };
 }
 
-function makeBuyer(student = false) {
+function makeBuyer(student = false, forcedProfile = '') {
   const rules = CONFIG.retail;
   const stock = counterInventory().filter(retailAvailable);
-  const useRegular = !student && Math.random() < .35;
-  const person = student ? { name: pick(GRILL.studentNames), avatar: '🎒' } : useRegular ? pick(REGULARS) : pick(BUYERS);
-  const age = /老|爷|叔/.test(person.name) ? 'older' : /学生|豆包|年轻/.test(person.name) ? 'young' : 'adult';
+  const forcedPeople = forcedProfile ? BUYERS.filter(person => person.profile === forcedProfile) : [];
+  const useRegular = !student && !forcedProfile && Math.random() < .35;
+  const person = student ? { name: pick(GRILL.studentNames), avatar: '🎒', profile: 'child' }
+    : forcedPeople.length ? pick(forcedPeople) : useRegular ? pick(REGULARS) : pick(BUYERS);
+  const profileId = forcedProfile || buyerProfileId(person);
+  const profile = BUYER_PROFILES[profileId];
+  const age = profileId === 'elder' ? 'older' : ['child', 'student', 'youngMan'].includes(profileId) ? 'young' : 'adult';
   const selfPick = stock.length > 0 && Math.random() < rules.selfPickChance;
   const hot = student ? stock.filter(entry => entry.grilled) : [];
   const pool = hot.length ? hot : stock;
   const anchor = pool.length ? pick(uniqueStock(pool)) : null;
   const product = anchor ? itemById(anchor.itemId) : null;
   const premium = product && product.base?.[1] > CONFIG.standardTradeMax && serviceAvailable('premium');
-  const range = student ? rules.everydayBudget : premium ? rules.premiumBudget
+  const lowBudget = student || profileId === 'child' || profileId === 'student';
+  const range = lowBudget ? rules.everydayBudget : premium ? rules.premiumBudget
     : anchor && !anchor.wholesale ? rules.specialtyBudget : rules.everydayBudget;
   const favor = useRegular ? getRegular(person.id).favor : 0;
-  const budget = Math.max(3, Math.round(randInt(...range) * (1 + state.rep / 400 + favor * .025)));
+  const budget = Math.max(3, Math.round(randInt(...range) * profile.budgetMult * (1 + state.rep / 400 + favor * .025)));
   const cap = !serviceAvailable('premium') ? Math.min(budget, CONFIG.standardTradeMax) : budget;
-  const wantedItem = !selfPick && product && Math.random() < rules.specificChance ? product.id : null;
+  const wantedItem = !selfPick && product && counterPrice(anchor) <= cap && Math.random() < rules.specificChance ? product.id : null;
+  const wantedCategory = !selfPick && !wantedItem && product && Math.random() < rules.categoryChance
+    ? shopCategory(product).id : null;
   const wantedCondition = wantedItem && !anchor.grilled && Math.random() < rules.conditionChance ? stockCondition(anchor) : null;
   const guest = {
     type: 'buyer', name: student ? person.name : useRegular ? person.name : age === 'young' ? '年轻顾客' : age === 'older' ? '路过的街坊' : '路过的顾客',
-    portraitName: person.name, avatar: person.avatar, age, cap, selfPick, wantedItem, wantedCondition,
-    regularId: useRegular ? person.id : null, receipt: [],
+    portraitName: person.name, avatar: person.avatar, age, profile: profileId, cap, selfPick, wantedItem, wantedCategory, wantedCondition,
+    regularId: useRegular ? person.id : null, receipt: [], priceStrategy: 'listed',
     creditAsk: serviceAvailable('ledger') && useRegular && Math.random() < CONFIG.creditChance,
+    maxHaggleRounds: randInt(...profile.rounds), bargainTarget: rand(profile.target[0], profile.target[1]),
+    willHaggle: Math.random() < profile.haggleChance, haggleRound: 0,
+    categoryFilter: wantedCategory || 'all',
   };
   const condition = wantedCondition ? CONDITION[wantedCondition].name + '的' : '';
   guest.line = (wantedItem ? '帮我拿一件' + condition + product.name + '。'
+    : wantedCategory ? '我想买点' + SHOP_CATEGORIES.find(category => category.id === wantedCategory).name + '，帮我挑挑。'
     : student ? '有热食吗？也可以帮我挑点别的。' : '帮我挑几样合适的吧。') + '我带了 ¥' + cap + '。';
   if (selfPick) fillSelfPickedReceipt(guest, pool);
   return guest;
@@ -461,7 +508,7 @@ function startDay() {
   enqueueStudents();
   addLog(`开店啦，今天有 ${state.queue.length} 位顾客排队。`);
   nextVisitor();
-  $(state.current ? '#guest-call' : '#btn-endday').focus();
+  $(state.current ? '#action-area' : '#btn-endday').focus({ preventScroll: true });
 }
 
 function finishVisit() {
@@ -476,6 +523,7 @@ function nextVisitor() {
   tradeOpen = false;
   inspectionFace = 0;
   inspectedPart = null;
+  receiptCollapsed = false;
   state.current = null;
   while (!state.current && state.queue.length) {
     const visitor = state.queue.shift();
@@ -484,9 +532,14 @@ function nextVisitor() {
     if (!state.current) addLog('有买家探头看了一眼：货架空了，先走了。');
   }
   if (state.current && state.current.regularId) getRegular(state.current.regularId).visits++;
-  showNewNeighbor();
+  // 顾客走到柜台就开始接待，避免再点一次人物才显示对白与交易面板。
+  tradeOpen = !!state.current;
+  // 街坊说明让位给正式接待；队列清空后再提示尚未见过的新街坊。
+  if (state.current) state.neighborTalk = null;
+  else showNewNeighbor();
   renderAll(); save();
-  if (returnFocus) $(state.current ? '#guest-call' : '#btn-endday').focus();
+  if (state.current) playCustomerArrival();
+  if (returnFocus) $(state.current ? '#action-area' : '#btn-endday').focus({ preventScroll: true });
 }
 
 /* ============================================================
@@ -531,6 +584,16 @@ function notifyPlayer(message, important = false) {
 
 function notifyCashShortage(cost) {
   notifyPlayer(`现金不足：需要 ¥${cost}，手头有 ¥${state.money}。`);
+}
+
+function showCashFeedback(total, profit) {
+  const panel = $('#cash-feedback');
+  panel.innerHTML = `<span>收款成功</span><strong>+¥${total}</strong><small>${profit >= 0 ? '这单赚了 ¥' + profit : '这单亏了 ¥' + Math.abs(profit)}</small>`;
+  panel.classList.remove('show');
+  void panel.offsetWidth;
+  panel.classList.add('show');
+  clearTimeout(cashFeedbackTimer);
+  cashFeedbackTimer = setTimeout(() => panel.classList.remove('show'), 1200);
 }
 
 function resolveBid(bid) {
@@ -610,17 +673,20 @@ function receiptQuote(guest) {
   return { subtotal, discount, budget, roundOff, total: discounted - roundOff };
 }
 
-function buyerReply(guest, quote) {
-  const replies = [];
-  if (guest.upsellReply) replies.push(guest.upsellReply);
-  if (quote.discount) replies.push('整单打九折呀！我再拿 ¥' + CONFIG.retail.discountBudgetBoost + '，预算一共 ¥' + quote.budget + '。');
-  if (quote.roundOff) replies.push('就差 ¥' + quote.roundOff + '，能帮我抹个零吗？');
-  return replies.join(' ');
+function receiptDealStatus(guest, quote) {
+  const lines = receiptLines(guest);
+  if (!lines.length) return { tone: 'idle', icon: '…', title: '等待配货', text: '把商品放进小票后再谈价格。', ready: false };
+  if (guest.dealSignal) return guest.dealSignal;
+  return {
+    tone: 'idle', icon: '?', title: '等待顾客回应',
+    text: `当前报价 ¥${quote.total}。点击报价后，顾客才会接受、还价或拒绝。`, ready: true,
+  };
 }
 
 function updateReceipt(guest) {
   const quote = receiptQuote(guest);
-  const reply = buyerReply(guest, quote);
+  const status = receiptDealStatus(guest, quote);
+  const lines = receiptLines(guest);
   $('#receipt-total').textContent = '¥' + quote.total;
   $('#receipt-savings').textContent = [
     quote.discount ? '原价 ¥' + quote.subtotal + ' · 整单优惠 −¥' + quote.discount : '',
@@ -629,20 +695,67 @@ function updateReceipt(guest) {
   const over = quote.total > quote.budget;
   $('#receipt-budget').textContent = over ? '超出预算 ¥' + (quote.total - quote.budget) : '预算余 ¥' + (quote.budget - quote.total);
   $('#receipt-budget').classList.toggle('over-budget', over);
-  $('#receipt-discount').disabled = !guest.discounted && Math.round(quote.subtotal * CONFIG.retail.receiptDiscount) === quote.subtotal;
-  $('#buyer-reply').textContent = reply;
-  $('#buyer-reply').classList.toggle('hidden', !reply);
-  renderDialogue(guest, guest.regularId ? '熟客 · 买家' : '买家', [guest.line, reply].filter(Boolean));
+  const signal = $('#deal-signal');
+  signal.dataset.tone = status.tone;
+  signal.innerHTML = `<strong>${status.icon}</strong><b>${status.title}</b><span>${status.text}</span>`;
+  const confirm = $('#receipt-confirm');
+  confirm.disabled = !lines.length || guest.awaitingRecommendation;
+  confirm.textContent = guest.awaitingRecommendation ? '先选择是否推荐'
+    : guest.haggleRound ? `再次报价 ¥${quote.total}` : `向顾客报价 ¥${quote.total}`;
+  const profile = BUYER_PROFILES[guest.profile] || BUYER_PROFILES.adult;
+  renderDialogue(guest, (guest.regularId ? '熟客 · ' : '') + profile.name + ' · 买家', [guest.line, guest.lastWords].filter(Boolean));
 }
 
-function toggleReceiptDiscount() {
+function adjustReceiptZoom(change) {
+  receiptZoom = clamp(Math.round((receiptZoom + change) * 10) / 10, .8, 1.2);
+  const receipt = $('.receipt');
+  if (!receipt) return;
+  receipt.style.setProperty('--receipt-scale', receiptZoom);
+  $('#receipt-zoom-level').textContent = Math.round(receiptZoom * 100) + '%';
+  $('#receipt-zoom-out').disabled = receiptZoom <= .8;
+  $('#receipt-zoom-in').disabled = receiptZoom >= 1.2;
+}
+
+function toggleReceiptCollapsed() {
+  receiptCollapsed = !receiptCollapsed;
+  const receipt = $('.receipt');
+  if (!receipt) return;
+  receipt.classList.toggle('collapsed', receiptCollapsed);
+  const button = $('#receipt-collapse');
+  button.textContent = receiptCollapsed ? '展开' : '收起';
+  button.setAttribute('aria-expanded', String(!receiptCollapsed));
+}
+
+function clearBuyerDraftResponse(guest) {
+  guest.dealSignal = null;
+}
+
+function resetBuyerNegotiation(guest) {
+  guest.haggleRound = 0;
+  guest.counterOffer = null;
+  guest.haggleResolved = false;
+  guest.haggleOnCredit = false;
+  guest.dealSignal = null;
+  guest.lastWords = '';
+  guest.awaitingRecommendation = false;
+  guest.recommendationOffered = false;
+}
+
+function applyReceiptStrategy(strategy) {
   const guest = state.current;
   if (guest?.type !== 'buyer' || !guest.receipt.length) return;
-  guest.discounted = !guest.discounted;
-  $('#receipt-discount').textContent = guest.discounted ? '取消九折' : '整单 −10%';
-  $('#receipt-discount').setAttribute('aria-pressed', String(guest.discounted));
-  updateReceipt(guest);
-  save();
+  guest.priceStrategy = strategy;
+  guest.discounted = strategy === 'friendly';
+  clearBuyerDraftResponse(guest);
+  for (const row of guest.receipt) {
+    const stock = counterInventory().find(entry => entry.uid === row.uid);
+    if (!stock) continue;
+    const listed = counterPrice(stock);
+    row.price = strategy === 'markup'
+      ? Math.max(listed + 1, Math.round(listed * CONFIG.retail.priceStrategyMarkup))
+      : listed;
+  }
+  renderVisitor(); save();
 }
 
 function editReceipt(uid, action) {
@@ -652,18 +765,24 @@ function editReceipt(uid, action) {
   const stock = counterInventory().find(entry => entry.uid === uid);
   if (action === 'add' && !guest.selfPick && stock && retailAvailable(stock) && !row) {
     if (guest.wantedItem && (!matchesBuyerRequest(guest, stock) || guest.receipt.length)) return;
-    guest.receipt.push({ uid, price: counterPrice(stock) });
+    if (guest.wantedCategory && !matchesBuyerRequest(guest, stock)) return;
+    const listed = counterPrice(stock);
+    const price = guest.priceStrategy === 'markup'
+      ? Math.max(listed + 1, Math.round(listed * CONFIG.retail.priceStrategyMarkup)) : listed;
+    guest.receipt.push({ uid, price });
+    resetBuyerNegotiation(guest);
   } else if (action === 'remove' && row) {
     guest.receipt = guest.receipt.filter(entry => entry !== row);
+    resetBuyerNegotiation(guest);
   } else if (action === 'label' && row && stock && !stock.grilled) {
     row.upgraded = !row.upgraded;
+    resetBuyerNegotiation(guest);
   }
   renderVisitor(); save();
 }
 
 function canRecommend(guest) {
-  return guest.selfPick && !guest.upsold && guest.regularId &&
-    getRegular(guest.regularId).favor >= CONFIG.retail.upsellFavor;
+  return !!guest.awaitingRecommendation && !guest.upsold;
 }
 
 function recommendStock(uid) {
@@ -671,16 +790,22 @@ function recommendStock(uid) {
   if (guest?.type !== 'buyer' || state.settlement || !canRecommend(guest)) return;
   const stock = counterInventory().find(entry => entry.uid === uid);
   if (!stock || !retailAvailable(stock) || guest.receipt.some(row => row.uid === uid)) return;
-  const row = { uid, price: counterPrice(stock) };
-  const quote = receiptQuote({ ...guest, receipt: [...guest.receipt, row] });
-  if (quote.total > quote.budget) {
-    guest.upsellReply = '这件先不加啦，钱不够。';
-  } else {
-    guest.upsellReply = '好，再帮我加一件' + itemById(stock.itemId).name + '。';
-    guest.upsold = true;
-    guest.receipt.push(row);
-  }
-  renderVisitor(); save();
+  const candidates = recommendationCandidates(guest);
+  if (!candidates.some(entry => entry.uid === uid)) return;
+  guest.receipt.push({ uid, price: counterPrice(stock) });
+  guest.upsold = true;
+  guest.awaitingRecommendation = false;
+  guest.lastWords = '行，把' + itemById(stock.itemId).name + '也加上。';
+  guest.dealSignal = { tone: 'good', icon: '+', title: '推荐成功', text: '加购商品已放入小票，准备一起收款。', ready: true };
+  settleBuyerSale(!!guest.pendingCredit, true);
+}
+
+function skipRecommendation() {
+  const guest = state.current;
+  if (guest?.type !== 'buyer' || !guest.awaitingRecommendation) return;
+  guest.awaitingRecommendation = false;
+  guest.lastWords = '不用再加了，就这些，结账吧。';
+  settleBuyerSale(!!guest.pendingCredit, true);
 }
 
 function allocateReceipt(lines, quote) {
@@ -709,21 +834,50 @@ function editReceiptPrice(uid, input) {
   const price = Number(input.value);
   const valid = input.value !== '' && Number.isInteger(price) && price >= 0 && price <= CONFIG.retail.maxUnitPrice;
   if (valid) {
+    guest.priceStrategy = 'custom';
+    guest.discounted = false;
     row.price = price;
+    clearBuyerDraftResponse(guest);
     updateReceipt(guest);
     save();
   }
 }
 
+function setReceiptPrice(uid, price, focusKey = '') {
+  const guest = state.current;
+  const row = guest?.receipt?.find(entry => entry.uid === uid);
+  if (!row) return;
+  guest.priceStrategy = 'custom';
+  guest.discounted = false;
+  row.price = clamp(Math.round(price), 0, CONFIG.retail.maxUnitPrice);
+  clearBuyerDraftResponse(guest);
+  renderVisitor();
+  save();
+  requestAnimationFrame(() => {
+    const target = focusKey && $(`[data-price-action="${focusKey}-${uid}"]`);
+    target?.focus({ preventScroll: true });
+  });
+}
+
+function adjustReceiptPrice(uid, change) {
+  const row = state.current?.receipt?.find(entry => entry.uid === uid);
+  if (row) setReceiptPrice(uid, row.price + change, change < 0 ? 'minus' : 'plus');
+}
+
 function matchesBuyerRequest(guest, stock, upgraded = false) {
-  return stock.itemId === guest.wantedItem && (!guest.wantedCondition ||
+  if (guest.wantedItem) return stock.itemId === guest.wantedItem && (!guest.wantedCondition ||
     (upgraded ? betterLabel(stock) : stockCondition(stock)) === guest.wantedCondition);
+  if (guest.wantedCategory) return shopCategory(itemById(stock.itemId)).id === guest.wantedCategory;
+  return true;
 }
 
 function receiptObjection(guest, lines) {
-  if (!guest.wantedItem) return '';
-  if (lines.length !== 1 || !matchesBuyerRequest(guest, lines[0].stock, lines[0].row.upgraded)) {
+  if (guest.wantedItem && (lines.length !== 1 || !matchesBuyerRequest(guest, lines[0].stock, lines[0].row.upgraded))) {
     return '我只要刚才点的那一件，能帮我改下小票吗？';
+  }
+  if (guest.wantedCategory && (!lines.length || lines.some(line => !matchesBuyerRequest(guest, line.stock, line.row.upgraded)))) {
+    const category = SHOP_CATEGORIES.find(entry => entry.id === guest.wantedCategory);
+    return '我今天只想买' + category.name + '，其他的先不要。';
   }
   return '';
 }
@@ -732,20 +886,122 @@ function betterLabel(stock) {
   return FOOD_LIFE[stock.itemId] ? 'fresh' : 'mint';
 }
 
-function settleBuyerSale(onCredit = false) {
+function buyerResponds(guest, words, signal) {
+  guest.lastWords = words;
+  guest.dealSignal = signal;
+  renderVisitor();
+  save();
+}
+
+function recommendationCandidates(guest, quote = receiptQuote(guest)) {
+  const remaining = Math.max(0, quote.budget - quote.total);
+  const reserved = new Set(guest.receipt.map(row => row.uid));
+  return uniqueStock(counterInventory().filter(stock => retailAvailable(stock) &&
+    !reserved.has(stock.uid) && counterPrice(stock) <= remaining))
+    .sort((a, b) => counterPrice(a) - counterPrice(b));
+}
+
+function maybeOfferRecommendation(guest, quote, onCredit) {
+  if (guest.recommendationOffered || guest.upsold) return false;
+  const candidates = recommendationCandidates(guest, quote);
+  if (!candidates.length || Math.random() >= CONFIG.retail.recommendationChance) return false;
+  guest.recommendationOffered = true;
+  guest.awaitingRecommendation = true;
+  guest.pendingCredit = onCredit;
+  guest.categoryFilter = 'all';
+  guest.counterOffer = null;
+  guest.lastWords = `这个价可以。我还剩 ¥${quote.budget - quote.total}，有合适的可以再推荐一件。`;
+  guest.dealSignal = { tone: 'good', icon: '+', title: '可以推荐加购', text: '顾客已经接受当前价格，可推荐一件预算内商品，也可直接收款。', ready: false };
+  renderVisitor();
+  save();
+  return true;
+}
+
+function setReceiptTotal(guest, target) {
+  const total = receiptTotal(guest);
+  const prices = guest.receipt.map(row => row.price);
+  let running = 0;
+  let allocated = 0;
+  guest.receipt.forEach((row, index) => {
+    running += prices[index];
+    const share = index === guest.receipt.length - 1 ? target : Math.round(target * running / total);
+    row.price = Math.max(0, share - allocated);
+    allocated = share;
+  });
+  guest.priceStrategy = 'custom';
+  guest.discounted = false;
+}
+
+function acceptBuyerCounterOffer() {
+  const guest = state.current;
+  if (guest?.type !== 'buyer' || !Number.isInteger(guest.counterOffer)) return;
+  const offer = guest.counterOffer;
+  setReceiptTotal(guest, offer);
+  guest.haggleResolved = true;
+  guest.counterOffer = null;
+  guest.lastWords = `好，¥${offer}，成交。`;
+  settleBuyerSale(!!guest.haggleOnCredit, true);
+}
+
+function continueBuyerHaggle(guest, quote, listedTotal, onCredit) {
+  if (guest.haggleRound >= guest.maxHaggleRounds) {
+    const rounds = guest.maxHaggleRounds;
+    notifyPlayer(`${guest.name}：已经谈了 ${rounds} 轮，还是算了，我不买了。`, true);
+    addLog(`${guest.name} 讨价 ${rounds} 轮后离开。`);
+    finishVisit();
+    return;
+  }
+  const target = Math.max(1, Math.min(quote.budget, Math.round(listedTotal * guest.bargainTarget)));
+  let offer = guest.counterOffer == null ? target : guest.counterOffer;
+  if (guest.counterOffer != null && quote.total > offer) {
+    const roundsLeft = Math.max(1, guest.maxHaggleRounds - guest.haggleRound);
+    offer = Math.min(quote.total - 1, offer + Math.max(1, Math.ceil((quote.total - offer) / (roundsLeft + 1))));
+  }
+  guest.haggleRound++;
+  guest.counterOffer = Math.max(0, offer);
+  guest.haggleOnCredit = onCredit;
+  const profile = BUYER_PROFILES[guest.profile] || BUYER_PROFILES.adult;
+  buyerResponds(guest,
+    `¥${quote.total} 还是贵了。¥${guest.counterOffer} 行不行？这是第 ${guest.haggleRound}/${guest.maxHaggleRounds} 轮。`,
+    { tone: 'risk', icon: '↔', title: profile.name + '正在还价', text: `顾客还价 ¥${guest.counterOffer}；可以接受、改价，或坚持当前报价。`, ready: false });
+}
+
+function settleBuyerSale(onCredit = false, forceAccept = false) {
   const guest = state.current;
   if (guest?.type !== 'buyer' || state.settlement || !guest.receipt.length) return;
+  prepareBuyerState(guest);
+  if (guest.awaitingRecommendation && !forceAccept) return;
   if (onCredit && (!guest.creditAsk || !serviceAvailable('ledger'))) return;
   const quote = receiptQuote(guest);
   const lines = allocateReceipt(receiptLines(guest), quote);
   if (lines.length !== guest.receipt.length || lines.some(({ stock }) => !retailAvailable(stock))) return notifyPlayer('小票里的库存有变动，请重新选货。');
   const { total } = quote;
   if (onCredit && total === 0) return notifyPlayer('小票合计为零，可以直接结账。');
-  if (total > quote.budget) return notifyPlayer('小票超过顾客预算，可以打折、减价或删掉商品。');
   const mismatch = receiptObjection(guest, lines);
-  if (mismatch) return notifyPlayer(guest.name + '：' + mismatch);
+  if (mismatch) return buyerResponds(guest, mismatch,
+    { tone: 'risk', icon: '!', title: '顾客拒绝这张小票', text: mismatch, ready: false });
+  if (total > quote.budget) {
+    const words = `要 ¥${total}？我只有 ¥${quote.budget}，这个价格买不了。`;
+    return buyerResponds(guest, words,
+      { tone: 'risk', icon: '!', title: '报价超过预算', text: `需要再降 ¥${total - quote.budget}，或移除商品。`, ready: false });
+  }
   const overpriced = lines.find(({ stock, revenue }) => revenue > acceptablePrice(stock));
-  if (overpriced) return notifyPlayer(guest.name + '：' + overpriced.item.name + '这个价有点高，能便宜些吗？');
+  if (overpriced) {
+    const words = overpriced.item.name + '这个价太高了，我不能按这个价买。';
+    return buyerResponds(guest, words,
+      { tone: 'risk', icon: '!', title: '单品报价被拒绝', text: overpriced.item.name + '需要降价后重新报价。', ready: false });
+  }
+  const listedTotal = lines.reduce((sum, { stock }) => sum + counterPrice(stock), 0);
+  const bargainTarget = Math.max(1, Math.min(quote.budget, Math.round(listedTotal * guest.bargainTarget)));
+  if (!forceAccept && guest.counterOffer != null && total <= guest.counterOffer) guest.haggleResolved = true;
+  if (!forceAccept && guest.willHaggle && !guest.haggleResolved && total > bargainTarget) {
+    return continueBuyerHaggle(guest, quote, listedTotal, onCredit);
+  }
+  guest.haggleResolved = true;
+  guest.counterOffer = null;
+  guest.lastWords = quote.roundOff ? `就按 ¥${total}，谢谢你帮我抹零。` : `行，¥${total}，成交。`;
+  guest.dealSignal = { tone: 'good', icon: '✓', title: '顾客接受报价', text: `顾客同意按 ¥${total} 购买。`, ready: true };
+  if (maybeOfferRecommendation(guest, quote, onCredit)) return;
   for (const { row, stock, item } of lines) {
     const relabelled = row.upgraded || stock.relabelled;
     const caught = row.upgraded && Math.random() < CONFIG.retail.conditionCheckChance;
@@ -759,6 +1015,7 @@ function settleBuyerSale(onCredit = false) {
     }
   }
   const sold = new Set(lines.map(({ stock }) => stock.uid));
+  const totalCost = lines.reduce((sum, { stock }) => sum + stock.cost, 0);
   state.shelf = state.shelf.filter(stock => !sold.has(stock.uid));
   state.grill.slots = state.grill.slots.filter(stock => !sold.has(stock.uid));
   const label = guest.name + ' 买走 ' + lines.length + ' 件商品';
@@ -782,10 +1039,19 @@ function settleBuyerSale(onCredit = false) {
   if (guest.regularId) addFavor(guest.regularId, (discount ? 2 : 1) + bonus);
   if (courtesy) {
     finishVisit();
+    if (!onCredit) {
+      playRegisterSound();
+      showCashFeedback(total, total - totalCost);
+    }
     notifyPlayer(guest.name + (quote.roundOff ? '：谢谢你帮我抹零！' : '：谢谢你给我打折！'));
     return;
   }
   finishVisit();
+  if (!onCredit) {
+    playRegisterSound();
+    showCashFeedback(total, total - totalCost);
+    notifyPlayer(`${guest.name}：成交，谢谢！实付 ¥${total}。`);
+  }
 }
 
 function buyerRefuse() {
@@ -984,7 +1250,7 @@ function endDay() {
   // 1) 收摊自动售卖
   const remain = [];
   for (const s of state.shelf) {
-    if (retailAvailable(s) && Math.random() < strat.autoRate) {
+    if (!state.devForceEvent && retailAvailable(s) && Math.random() < strat.autoRate) {
       const price = Math.max(1, Math.round(stockValue(s) * strat.autoMult));
       state.money += price;
       autoList.push({ itemId: s.itemId, label: `自动售出 ${itemById(s.itemId).name}`, revenue: price, profit: price - s.cost });
@@ -1007,7 +1273,9 @@ function endDay() {
     e.done = true;
     const reg = e.regularId ? regularById(e.regularId) : null;
     const repayChance = 1 - (1 - CONFIG.creditRepayChance) * (reg ? reg.risk : 1);
-    if (Math.random() < repayChance) {
+    const forcedRepay = DEV_MODE && state.devForceEvent === 'credit-repay';
+    const forcedDefault = DEV_MODE && state.devForceEvent === 'credit-default';
+    if (forcedRepay || (!forcedDefault && Math.random() < repayChance)) {
       e.result = 'repaid';
       state.money += e.amount;
       countGoodVisit();
@@ -1030,13 +1298,15 @@ function endDay() {
     state.money += income;
     others.push({ label: '🍬 集贴纸活动带来的零食收入', amount: income });
     st.grumble += st.rare > 0 ? randInt(STICKER.grumbleHas[0], STICKER.grumbleHas[1]) : randInt(STICKER.grumbleZero[0], STICKER.grumbleZero[1]);
-    if (st.rare > 0 && Math.random() < st.rare * STICKER.redeemChancePerRare) {
+    const forcedRedeem = DEV_MODE && state.devForceEvent === 'sticker-redeem';
+    const forcedComplaint = DEV_MODE && state.devForceEvent === 'sticker-complaint';
+    if (forcedRedeem || (!forcedComplaint && st.rare > 0 && Math.random() < st.rare * STICKER.redeemChancePerRare)) {
       state.money -= STICKER.redeemPay;
       changeReputation(STICKER.redeemRep);
       st.rare--; st.grumble = 0; st.badge = true; state.specialCards.jinlong = true;
       others.push({ label: '🏆 有孩子集满贴纸！兑付 ¥100，赢得「良心小卖部」名声', amount: -STICKER.redeemPay });
       addLog('有孩子集满了贴纸！你含泪兑付 ¥100，街坊都夸你是良心小卖部。');
-    } else if (st.grumble >= STICKER.grumbleLimit) {
+    } else if (forcedComplaint || st.grumble >= STICKER.grumbleLimit) {
       state.money -= STICKER.complaintFine;
       changeReputation(STICKER.complaintRep);
       st.grumble = STICKER.grumbleAfterComplaint;
@@ -1075,6 +1345,7 @@ function endDay() {
     daytimeSpend: dayTotal + state.openingMoney - cashBeforeClosing,
     net: state.money - state.openingMoney,
   };
+  delete state.devForceEvent;
   save();
   renderAll();
   showSettlement(state.settlement);
@@ -1115,7 +1386,6 @@ function openingArrow() {
   const guest = state.current;
   if (!guest) return { target: '#btn-endday', hint: '顾客接待完了，点这里收摊' };
   if (state.daySales.length || guest.type !== 'buyer') return null;
-  if (!tradeOpen) return { target: '#guest-call', hint: '点顾客开始接待' };
   if (!state.shelf.length) return { target: '[data-order="wh-noodles"]:enabled', via: '#open-wholesale', hint: '先进一批干脆面' };
   if (!guest.receipt.length) return { target: '#action-area .buyer-options button', hint: '点商品加入小票' };
   return { target: '#receipt-confirm', hint: '核对小票后结账' };
@@ -1213,10 +1483,10 @@ function renderGuide() {
   let text;
   if (state.settlement) text = '看完今天的流水，点「进入明天」。';
   else if (!state.shopOpen) text = '可以先点「进货」备货，准备好后点「开店」。';
-  else if (guest && guest.type === 'buyer') text = '点窗前的顾客，按他的需求准备商品并开小票。';
+  else if (guest && guest.type === 'buyer') text = '顾客会自动走到柜台。按他的需求准备商品并开小票。';
   else if (!hasOrdered && (state.shelf.length || !guest) && state.money >= WHOLESALE[0].cost * WHOLESALE[0].pack) {
     text = '试试从供货商补货。点窗台的「进货」，订一批干脆面。';
-  } else if (guest) text = '点窗前的顾客，看看他带来了什么。';
+  } else if (guest) text = '顾客已经到柜台，看看他带来了什么。';
   else text = '顾客接待完了，点「收摊结算」看看今天的流水。';
   $('#guide-text').textContent = text;
   tradeGuide.textContent = !guest ? ''
@@ -1303,16 +1573,18 @@ function renderShopClock() {
 
 function renderWindow() {
   const guest = state.current;
+  const street = $('.street');
   const call = $('#guest-call');
+  street.classList.toggle('has-customer', !!guest);
   call.classList.toggle('hidden', !guest);
   const trading = !!guest && tradeOpen;
   $('#counter').classList.toggle('hidden', !trading);
   $('#counter').classList.toggle('seller-stage', guest?.type === 'seller');
   $('#trade-dialogue').classList.toggle('hidden', !trading);
   call.setAttribute('aria-expanded', String(trading));
-  call.setAttribute('aria-label', guest ? guest.name + (trading ? '，收起交易' : '，接待') : '');
+  call.setAttribute('aria-label', guest ? guest.name + '，回到交易区' : '');
   $('#guest-label').textContent = guest
-    ? guest.name + (guest.type === 'seller' ? ' · 来卖货' : ' · 来买货') + (tradeOpen ? '　收起交易' : '　接待')
+    ? guest.name + (guest.type === 'seller' ? ' · 来卖货' : ' · 来买货')
     : '';
   renderShopClock();
   $('#btn-openday').classList.toggle('hidden', state.shopOpen || !!state.settlement);
@@ -1328,6 +1600,14 @@ function renderWindow() {
     `<i class="${state.poke.opened?.includes(index) ? 'open' : ''}"></i>`).join('');
 }
 
+function playCustomerArrival() {
+  const call = $('#guest-call');
+  const dialogue = $('#trade-dialogue');
+  for (const element of [call, dialogue]) element.classList.remove('customer-arriving');
+  void call.offsetWidth;
+  for (const element of [call, dialogue]) element.classList.add('customer-arriving');
+}
+
 function displayProductIds() {
   return [...new Set(state.shelf.filter(retailAvailable).map(stock => stock.itemId))];
 }
@@ -1339,9 +1619,12 @@ function renderCounterSlots() {
     const selected = state.displaySlots[index];
     const id = selected == null ? unassigned.shift() : selected;
     const item = products.includes(id) ? itemById(id) : null;
+    const count = item ? state.shelf.filter(stock => stock.itemId === id && retailAvailable(stock)).length : 0;
     return `<button type="button" id="display-slot-${index}" class="display-slot" aria-haspopup="dialog"
       onclick="openDisplaySlot(${index})" aria-label="第 ${index + 1} 格，${item ? item.name : '空位'}"
-      title="${item ? item.name : '摆放商品'}">${item ? itemArtwork(id) : '<span aria-hidden="true">+</span>'}</button>`;
+      title="${item ? item.name + '，库存 ' + count : '摆放商品'}">${item
+        ? itemArtwork(id) + `<small class="display-stock-badge" aria-hidden="true">${count}</small><span class="display-item-name">${item.name}</span>`
+        : '<span class="display-empty-slot" aria-hidden="true">+</span><span class="display-item-name">布置</span>'}</button>`;
   }).join('');
 }
 
@@ -1377,6 +1660,7 @@ function renderTop() {
   $('#stat-rep').title = '口碑进度 ' + state.repVisits + ' / ' + CONFIG.reputation.visitsPerPoint;
   $('#stat-goal').textContent = state.won ? '🎯 已盘下店面！' : `🎯 盘下店面 ¥${state.money} / ¥${CONFIG.goalMoney}`;
   $('#win-banner').classList.toggle('hidden', !(state.won && !state.winSeen));
+  $('#open-dev').classList.toggle('hidden', !DEV_MODE);
 }
 
 function esc(t) { return String(t); } // 文案均为自创可信文本，不做额外转义
@@ -1493,33 +1777,65 @@ function customBid() {
 
 function renderBuyer(guest, area, act) {
   area.innerHTML = '';
+  prepareBuyerState(guest);
+  if (!guest.priceStrategy) guest.priceStrategy = 'listed';
   const lines = receiptLines(guest);
   const reserved = new Set(guest.receipt.map(row => row.uid));
-  const available = uniqueStock(counterInventory().filter(stock =>
-    retailAvailable(stock) && !reserved.has(stock.uid) &&
-    (!guest.wantedItem || (!guest.receipt.length && matchesBuyerRequest(guest, stock)))));
+  const availableAll = guest.awaitingRecommendation ? recommendationCandidates(guest)
+    : uniqueStock(counterInventory().filter(stock => retailAvailable(stock) && !reserved.has(stock.uid) &&
+      (!guest.wantedItem || (!guest.receipt.length && matchesBuyerRequest(guest, stock))) &&
+      (!guest.wantedCategory || matchesBuyerRequest(guest, stock))));
+  const category = SHOP_CATEGORIES.find(entry => entry.id === guest.categoryFilter);
+  const available = category ? availableAll.filter(stock => shopCategory(itemById(stock.itemId)).id === category.id) : availableAll;
   const clearance = available.filter(stock => serviceAvailable('clearance') && stockCondition(stock) === 'near');
   const grilled = available.filter(stock => stock.grilled);
   const regular = available.filter(stock => !stock.grilled && !clearance.includes(stock));
+  const request = guest.wantedItem ? `指定商品：${itemById(guest.wantedItem).name}`
+    : guest.wantedCategory ? `指定类别：${SHOP_CATEGORIES.find(entry => entry.id === guest.wantedCategory).name}`
+    : guest.selfPick ? '顾客已经选好商品' : '自由配货';
+  const canChoose = guest.awaitingRecommendation || (!guest.selfPick && !(guest.wantedItem && guest.receipt.length));
   act.innerHTML = `<div class="checkout">
     <div class="checkout-stock">
-      <p class="buyer-request">${guest.line}</p>
-      <p id="buyer-reply" class="buyer-request hidden"></p>
-      ${guest.wantedItem && guest.receipt.length ? '' : guest.selfPick
-        ? canRecommend(guest) ? renderBuyerOptions('推荐加购', available, guest) : ''
+      <div class="buyer-request-summary"><strong>${request}</strong><span>预算 ¥${guest.cap}</span></div>
+      ${canChoose && !guest.wantedItem ? renderCategoryFilter(availableAll, guest) : ''}
+      ${guest.awaitingRecommendation
+        ? renderBuyerOptions(`推荐加购 · 最多再花 ¥${receiptQuote(guest).budget - receiptQuote(guest).total}`, available, guest)
+          + '<button type="button" class="btn small" onclick="skipRecommendation()">不推荐，按当前小票收款</button>'
+        : guest.wantedItem && guest.receipt.length || guest.selfPick ? ''
         : renderBuyerOptions('货架', regular, guest) +
           (clearance.length ? renderBuyerOptions('临期促销区', clearance, guest, 'clearance') : '') +
           (grilled.length ? renderBuyerOptions('现烤热食', grilled, guest) : '')}
       <button type="button" class="btn small" onclick="buyerRefuse()">结束接待</button>
     </div>
-    <form class="receipt" onsubmit="event.preventDefault(); settleBuyerSale()">
-      <header><strong>购物小票</strong><small>第 ${state.day} 天 · ${guest.selfPick ? '顾客自选' : '店主配货'}</small></header>
+    <form class="receipt${receiptCollapsed ? ' collapsed' : ''}" style="--receipt-scale:${receiptZoom}" onsubmit="event.preventDefault(); settleBuyerSale()">
+      <header class="receipt-header">
+        <div><strong>购物小票</strong><small>第 ${state.day} 天 · ${guest.selfPick ? '顾客自选' : '店主配货'}</small></div>
+        <div class="receipt-window-controls" aria-label="小票显示大小">
+          <button id="receipt-zoom-out" type="button" onclick="adjustReceiptZoom(-.1)" aria-label="缩小小票" ${receiptZoom <= .8 ? 'disabled' : ''}>−</button>
+          <span id="receipt-zoom-level">${Math.round(receiptZoom * 100)}%</span>
+          <button id="receipt-zoom-in" type="button" onclick="adjustReceiptZoom(.1)" aria-label="放大小票" ${receiptZoom >= 1.2 ? 'disabled' : ''}>＋</button>
+          <button id="receipt-collapse" type="button" aria-expanded="${!receiptCollapsed}" onclick="toggleReceiptCollapsed()">${receiptCollapsed ? '展开' : '收起'}</button>
+        </div>
+      </header>
       ${lines.map(renderReceiptLine).join('') || '<p class="receipt-empty">小票里没有商品</p>'}
+      ${lines.length ? `<section class="deal-strategy" aria-label="成交策略">
+        <span>这单怎么谈？</span>
+        <div class="deal-options">
+          <button type="button" aria-pressed="${guest.priceStrategy === 'friendly'}" onclick="applyReceiptStrategy('friendly')">爽快让利<small>整单九折 · 涨好感</small></button>
+          <button type="button" aria-pressed="${guest.priceStrategy === 'listed'}" onclick="applyReceiptStrategy('listed')">照标价卖<small>稳妥成交</small></button>
+          <button type="button" aria-pressed="${guest.priceStrategy === 'markup'}" onclick="applyReceiptStrategy('markup')">试着加价<small>约加一成 · 多利润</small></button>
+        </div>
+        <div id="deal-signal" class="deal-signal" aria-live="polite"></div>
+      </section>` : '<div id="deal-signal" class="deal-signal" aria-live="polite"></div>'}
       <div class="receipt-totals"><span>合计</span><strong id="receipt-total"></strong>
         <small id="receipt-savings"></small><small id="receipt-budget"></small></div>
-      <div class="trade-actions">
-        <button id="receipt-confirm" class="btn gold" ${lines.length ? '' : 'disabled'}>确认结账</button>
-        <button id="receipt-discount" type="button" class="btn receipt-discount" aria-pressed="${!!guest.discounted}" onclick="toggleReceiptDiscount()">${guest.discounted ? '取消九折' : '整单 −10%'}</button>
+      ${lines.length ? `<details class="receipt-advanced">
+        <summary>高级调价 · 逐件修改</summary>
+        ${lines.map(renderReceiptEditor).join('')}
+      </details>` : ''}
+      <div class="trade-actions receipt-confirm-row">
+        <button id="receipt-confirm" class="btn gold" disabled>先调整价格</button>
+        ${guest.counterOffer != null && !guest.awaitingRecommendation ? `<button class="btn" type="button" onclick="acceptBuyerCounterOffer()">接受还价 ¥${guest.counterOffer}</button>` : ''}
         ${guest.creditAsk && lines.length ? '<button class="btn" type="submit" formaction="#" onclick="event.preventDefault(); if (this.form.reportValidity()) settleBuyerSale(true)">记赊账</button>' : ''}
       </div>
     </form>
@@ -1527,15 +1843,36 @@ function renderBuyer(guest, area, act) {
   updateReceipt(guest);
 }
 
+function setBuyerCategoryFilter(id) {
+  const guest = state.current;
+  if (guest?.type !== 'buyer' || !['all', ...SHOP_CATEGORIES.map(category => category.id)].includes(id)) return;
+  guest.categoryFilter = id;
+  renderVisitor();
+  save();
+  requestAnimationFrame(() => $(`[data-buyer-category="${id}"]`)?.focus({ preventScroll: true }));
+}
+
+function renderCategoryFilter(stocks, guest) {
+  const counts = Object.fromEntries(SHOP_CATEGORIES.map(category => [category.id,
+    stocks.filter(stock => shopCategory(itemById(stock.itemId)).id === category.id).length]));
+  const buttons = [{ id: 'all', name: '全部', count: stocks.length },
+    ...SHOP_CATEGORIES.map(category => ({ ...category, count: counts[category.id] }))]
+    .filter(category => category.id === 'all' || category.count)
+    .map(category => `<button type="button" data-buyer-category="${category.id}"
+      aria-pressed="${guest.categoryFilter === category.id}" onclick="setBuyerCategoryFilter('${category.id}')">${category.name}<small>${category.count}</small></button>`).join('');
+  return `<nav class="buyer-category-filter" aria-label="按商品类别筛选">${buttons}</nav>`;
+}
+
 function renderBuyerOptions(title, stocks, guest, guide = '') {
-  const action = guest.selfPick ? '推荐' : '添加';
+  const action = guest.awaitingRecommendation ? '推荐' : '添加';
   const tiles = stocks.map(stock => {
     const product = itemById(stock.itemId);
     const wanted = stock.itemId === guest.wantedItem;
-    const handler = guest.selfPick ? `recommendStock(${stock.uid})` : `editReceipt(${stock.uid},'add')`;
+    const category = shopCategory(product);
+    const handler = guest.awaitingRecommendation ? `recommendStock(${stock.uid})` : `editReceipt(${stock.uid},'add')`;
     return `<button type="button" class="stock-tile" onclick="${handler}" aria-label="${action}${product.name}，${(stock.grilled ? grillStage(stock) : CONDITION[stockCondition(stock)]).name}，¥${counterPrice(stock)}">
       ${itemArtwork(product.id)}<span>${product.name}${wanted ? ' · 点名' : ''}</span>
-      ${conditionBadge(stock)}<small>+ ¥${counterPrice(stock)}</small></button>`;
+      <small class="stock-category">${category.name}</small>${conditionBadge(stock)}<small class="stock-price">+ ¥${counterPrice(stock)}</small></button>`;
   }).join('');
   return `<section class="checkout-options" data-guide="${guide}"><h3>${title}</h3>${tiles ? '<div class="buyer-options">' + tiles + '</div>' : '<p>暂无可添加的商品</p>'}</section>`;
 }
@@ -1543,12 +1880,34 @@ function renderBuyerOptions(title, stocks, guest, guide = '') {
 function renderReceiptLine({ row, stock, item }) {
   const canRelabel = !stock.grilled && (stock.variant === 'fake' || stockCondition(stock) !== betterLabel(stock));
   const label = stock.grilled ? grillStage(stock).name : CONDITION[row.upgraded ? betterLabel(stock) : stockCondition(stock)].name;
-  return `<div class="receipt-line">
-    <div><strong>${item.name}</strong><small>${label}${row.upgraded ? ' · 已改签' : ''}</small></div>
-    <label>¥ <input type="number" min="0" max="${CONFIG.retail.maxUnitPrice}" step="1" required
-      inputmode="numeric" value="${row.price}" aria-label="${item.name}单价" oninput="editReceiptPrice(${row.uid},this)"></label>
+  return `<div class="receipt-line receipt-summary-line">
+    <div><strong>${item.name}</strong><small>${shopCategory(item).name} · ${label}${row.upgraded ? ' · 已改签' : ''}</small></div>
+    <strong class="receipt-unit-price">¥${row.price}</strong>
     <button type="button" class="receipt-remove" onclick="editReceipt(${row.uid},'remove')" aria-label="移除${item.name}">×</button>
     ${canRelabel ? `<button type="button" class="receipt-label" onclick="editReceipt(${row.uid},'label')">${row.upgraded ? '恢复原签' : '悄悄改成' + CONDITION[betterLabel(stock)].name}</button>` : ''}
+  </div>`;
+}
+
+function renderReceiptEditor({ row, stock, item }) {
+  const listed = counterPrice(stock);
+  const presets = [
+    ['让利档', Math.max(0, Math.min(listed - 1, Math.round(listed * CONFIG.retail.receiptDiscount))), 'discount'],
+    ['按标价', listed, 'listed'],
+    ['加价档', Math.max(listed + 1, Math.round(listed * CONFIG.retail.priceStrategyMarkup)), 'markup'],
+  ].filter((entry, index, all) => all.findIndex(other => other[1] === entry[1]) === index)
+    .map(([text, price, key]) => `<button type="button" data-price-action="${key}-${row.uid}"
+      aria-pressed="${row.price === price}" onclick="setReceiptPrice(${row.uid},${price},'${key}')">${text}<small>¥${price}</small></button>`).join('');
+  return `<div class="receipt-editor-row">
+    <strong>${item.name}</strong>
+    <div class="receipt-price-editor">
+      <div class="price-stepper">
+        <button type="button" data-price-action="minus-${row.uid}" onclick="adjustReceiptPrice(${row.uid},-1)" aria-label="${item.name}减一元">−</button>
+        <label><span>单价</span><b>¥</b><input type="number" min="0" max="${CONFIG.retail.maxUnitPrice}" step="1" required
+          inputmode="numeric" value="${row.price}" aria-label="${item.name}单价" oninput="editReceiptPrice(${row.uid},this)"></label>
+        <button type="button" data-price-action="plus-${row.uid}" onclick="adjustReceiptPrice(${row.uid},1)" aria-label="${item.name}加一元">＋</button>
+      </div>
+      <div class="price-presets" aria-label="${item.name}快捷定价">${presets}</div>
+    </div>
   </div>`;
 }
 
@@ -1604,7 +1963,7 @@ function tabShelf() {
     const item = itemById(stock.itemId);
     return `<button type="button" class="stock-tile" id="shelf-${stock.uid}" onclick="viewStock(${stock.uid})"
       aria-label="查看${item.name}">${itemArtwork(item.id)}${count > 1 ? '<small class="stock-count">×' + count + '</small>' : ''}
-      <span>${item.name}</span>${conditionBadge(stock)}</button>`;
+      <span>${item.name}</span><small class="stock-category">${shopCategory(item).name}</small>${conditionBadge(stock)}</button>`;
   }).join('');
   const strategies = Object.entries(STRATEGIES).map(([key, rule]) =>
     `<button class="btn small" aria-pressed="${state.strategy === key}" onclick="setStrategy('${key}')">${rule.name}</button>`).join('');
@@ -1747,6 +2106,130 @@ function showSettlement(s) {
   $('#modal-mask').classList.remove('hidden');
 }
 
+/* ---------------- 开发者测试台（正式版由 DEV_MODE 统一关闭） ---------------- */
+function devStageName(key) {
+  return key === 'opening' ? '开局零售' : SERVICE_NAMES[key] || key;
+}
+
+function devSetStage(key) {
+  if (!DEV_MODE || !DEV_CONFIG.stages.includes(key)) return;
+  const milestone = key === 'opening' ? [0, 0] : MILESTONES[key];
+  state.progress.sales = milestone[0];
+  state.progress.days = milestone[1];
+  state.progress.kept = [];
+  state.grill.owned = key === 'grill';
+  state.seenTutorials = TUTORIALS.filter(lesson => serviceAvailable(lesson.unlock)).map(lesson => lesson.id);
+  state.guidedLessons = [...state.seenTutorials];
+  renderAll(); save(); renderDeveloperPanel();
+  notifyPlayer(`开发测试：已切到「${devStageName(key)}」阶段。`);
+}
+
+function devGrantResources() {
+  if (!DEV_MODE) return;
+  state.money = Math.max(state.money, DEV_CONFIG.grantMoney);
+  const addStock = (item, wholesale = false) => {
+    const existing = state.shelf.filter(stock => stock.itemId === item.id).length;
+    for (let i = existing; i < DEV_CONFIG.stockEach; i++) {
+      const value = wholesale ? item.value : Math.round((item.base[0] + item.base[1]) / 2);
+      state.shelf.push({
+        uid: nextUid(), itemId: item.id, variant: 'real', condition: 'mint',
+        cost: Math.max(1, Math.round(value * DEV_CONFIG.stockCostMultiplier)), value, wholesale, stockedDay: state.day,
+      });
+    }
+  };
+  WHOLESALE.forEach(item => addStock(item, true));
+  ITEMS.forEach(item => addStock(item));
+  renderAll(); save(); renderDeveloperPanel();
+  notifyPlayer('开发测试：资金与全品类商品已补齐。');
+}
+
+function devMeetVisitor(kind, profile = '') {
+  if (!DEV_MODE || !['buyer', 'seller', 'credit'].includes(kind)) return;
+  if (profile && !BUYER_PROFILES[profile]) return;
+  if (kind !== 'seller' && !counterInventory().some(retailAvailable)) devGrantResources();
+  state.settlement = null;
+  $('#modal-mask').classList.add('hidden');
+  state.shopOpen = true;
+  state.queue = [];
+  let visitor = kind === 'seller' ? makeSeller() : makeBuyer(false, profile);
+  if (kind === 'credit') {
+    if (!state.progress.kept.includes('ledger')) state.progress.kept.push('ledger');
+    const regular = REGULARS[0];
+    visitor.regularId = regular.id;
+    visitor.name = regular.name;
+    visitor.portraitName = regular.name;
+    visitor.avatar = regular.avatar;
+    visitor.creditAsk = true;
+  }
+  state.current = visitor;
+  state.neighborTalk = null;
+  tradeOpen = true;
+  $('#dev-panel').close();
+  renderAll(); save(); playCustomerArrival();
+}
+
+function devRunSettlement(kind) {
+  if (!DEV_MODE || !['rent', 'sticker-redeem', 'sticker-complaint', 'credit-repay', 'credit-default'].includes(kind)) return;
+  state.settlement = null;
+  state.current = null;
+  state.queue = [];
+  state.shopOpen = true;
+  state.daySales = [];
+  state.openingMoney = state.money;
+  state.devForceEvent = kind;
+  if (kind === 'rent') state.day = Math.max(CONFIG.rentCycle, Math.ceil(state.day / CONFIG.rentCycle) * CONFIG.rentCycle);
+  if (kind.startsWith('sticker')) {
+    state.sticker.on = true;
+    state.sticker.rare = kind === 'sticker-redeem' ? 1 : 0;
+    state.sticker.grumble = kind === 'sticker-complaint' ? STICKER.grumbleLimit : 0;
+  }
+  if (kind.startsWith('credit')) {
+    const regular = REGULARS[0];
+    state.ledger.push({
+      id: nextUid(), regularId: regular.id, whoName: regular.name,
+      amount: DEV_CONFIG.creditAmount, due: state.day, done: false, result: null,
+    });
+  }
+  $('#dev-panel').close();
+  $('#modal-mask').classList.add('hidden');
+  save();
+  endDay();
+}
+
+function devSetGrillStage(key) {
+  if (!DEV_MODE) return;
+  const stage = GRILL.stages.find(entry => entry.key === key);
+  if (!stage) return;
+  state.progress.sales = Math.max(state.progress.sales, MILESTONES.grill[0]);
+  state.progress.days = Math.max(state.progress.days, MILESTONES.grill[1]);
+  state.grill.owned = true;
+  state.grill.slots = [{
+    uid: nextUid(), itemId: GRILL.foods[0].id, cost: GRILL.foods[0].cost,
+    value: GRILL.foods[0].value, variant: 'real', grilled: true,
+    placedAt: state.serviceTurns - stage.turns,
+  }];
+  $('#dev-panel').close();
+  renderAll(); save(); openManagement('grill');
+}
+
+function renderDeveloperPanel() {
+  if (!DEV_MODE) return;
+  $('#dev-status').textContent = `第 ${state.day} 天 · 付现小票 ${state.progress.sales} · 收摊 ${state.progress.days} · 资金 ¥${state.money}`;
+  $('#dev-stages').innerHTML = DEV_CONFIG.stages.map(key => {
+    const milestone = key === 'opening' ? [0, 0] : MILESTONES[key];
+    const active = state.progress.sales === milestone[0] && state.progress.days === milestone[1];
+    return `<button type="button" class="btn" aria-pressed="${active}" onclick="devSetStage('${key}')">${devStageName(key)}<br><small>${milestone[0]} 单 / ${milestone[1]} 天</small></button>`;
+  }).join('');
+  $('#dev-grill-stages').innerHTML = GRILL.stages.map(stage =>
+    `<button type="button" class="btn" onclick="devSetGrillStage('${stage.key}')">${stage.name}<br><small>${stage.turns} 回合</small></button>`).join('');
+}
+
+function openDeveloperPanel() {
+  if (!DEV_MODE) return;
+  renderDeveloperPanel();
+  $('#dev-panel').showModal();
+}
+
 /* ---------------- 初始化与全局绑定 ---------------- */
 function resetGame() {
   if (!confirm('确定要清空存档、重新开店吗？')) return;
@@ -1775,8 +2258,10 @@ $('#btn-openday').addEventListener('click', startDay);
 $('#btn-endday').addEventListener('click', endDay);
 $('#guest-call').addEventListener('click', () => {
   if (!state.current || state.settlement) return;
-  tradeOpen = !tradeOpen;
+  tradeOpen = true;
   renderWindow();
+  $('#counter').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  $('#action-area').focus({ preventScroll: true });
 });
 function openManagement(tab) {
   currentTab = tab;
@@ -1799,6 +2284,8 @@ $('#close-neighborhood').addEventListener('click', closeNeighborhood);
 $('#promote-shop').addEventListener('click', recruitShoppers);
 $('#music-toggle').addEventListener('click', toggleMusic);
 $('#music-volume').addEventListener('input', setMusicVolume);
+$('#open-dev').addEventListener('click', openDeveloperPanel);
+$('#close-dev').addEventListener('click', () => $('#dev-panel').close());
 $('#event-dialog').addEventListener('close', () => $(state.current ? '#guest-call' : '#btn-endday').focus());
 $('#close-item-viewer').addEventListener('click', () => $('#item-viewer').close());
 $('#zoom-item').addEventListener('click', () => {
@@ -1841,6 +2328,7 @@ if (state.shopOpen && !state.settlement && (!state.current && state.queue.length
   if (state.current?.type === 'buyer') state.queue.unshift({ type: 'buyer' });
   nextVisitor();
 }
+if (state.current && !state.settlement) tradeOpen = true;
 renderAll();
 if (state.settlement) showSettlement(state.settlement);
 openTitle();

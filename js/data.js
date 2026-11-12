@@ -36,7 +36,8 @@ const CONFIG = {
     selfPickChance: .45,
     selfPickCount: [1, 3],
     specificChance: .35,
-    upsellFavor: 4,
+    categoryChance: .45,
+    recommendationChance: .65,
     freshSaleFavor: 1,
     freshSaleRepProgress: 1,
     priceTolerance: { standard: 1.2, fresh: 1.5, mint: 1.65, bloom: 1.5 },
@@ -45,6 +46,7 @@ const CONFIG = {
     conditionPenalty: 2,
     clearanceMultiplier: .75,
     receiptDiscount: .9,
+    priceStrategyMarkup: 1.1,
     discountBudgetBoost: 2,
     roundOffAmount: 1,
     courtesyRepProgress: 1,
@@ -78,6 +80,15 @@ const CONFIG = {
   favorSpecialAt: 6,        // 好感≥6：偶尔带来保真专属好货
 };
 
+/* 仅供本地开发测试台使用；正式版关闭 game.js 顶部的 DEV_MODE。 */
+const DEV_CONFIG = {
+  grantMoney: 5000,
+  stockEach: 2,
+  stockCostMultiplier: .4,
+  creditAmount: 42,
+  stages: ['opening', 'clearance', 'receiving', 'ledger', 'sticker', 'premium', 'grill'],
+};
+
 /* ---------------- 定价策略（三档） ----------------
  * mult：买家出价倍率；buyers：每日买家数修正；
  * autoRate：收摊自动售出概率；autoMult：自动售出价倍率 */
@@ -87,25 +98,44 @@ const STRATEGIES = {
   high: { name: '高价慢卖', mult: 1.30, buyers: -1, autoRate: 0.35, autoMult: 1.45 },
 };
 
+/* 玩家经营时使用的商品大类。原物品 cat 继续保留，供收藏偏好和鉴定使用。 */
+const SHOP_CATEGORIES = [
+  { id: 'food', name: '食物', cats: ['食品', '热食'] },
+  { id: 'study', name: '学习用品', cats: ['文具'] },
+  { id: 'daily', name: '日用品', cats: ['日用', '电器'] },
+  { id: 'fun', name: '玩具娱乐', cats: ['玩具', '卡牌', '潮流'] },
+  { id: 'collect', name: '收藏旧物', cats: ['收藏'] },
+];
+
+/* 买家画像：预算倍率、主动讨价概率、最多报价回合、期望折扣区间。 */
+const BUYER_PROFILES = {
+  child:    { name: '小学生', budgetMult: .68, haggleChance: .08, rounds: [1, 1], target: [.94, .98] },
+  student:  { name: '学生', budgetMult: .82, haggleChance: .18, rounds: [1, 2], target: [.90, .97] },
+  youngMan: { name: '青年男生', budgetMult: 1.05, haggleChance: .48, rounds: [2, 2], target: [.88, .95] },
+  auntie:   { name: '大婶', budgetMult: 1.00, haggleChance: .86, rounds: [4, 5], target: [.78, .88] },
+  adult:    { name: '普通顾客', budgetMult: 1.00, haggleChance: .34, rounds: [2, 3], target: [.87, .95] },
+  elder:    { name: '老街坊', budgetMult: .95, haggleChance: .52, rounds: [3, 4], target: [.83, .92] },
+};
+
 /* ---------------- 熟客（全原创） ----------------
  * favor 好感度；patience 砍价耐心修正；fakeBias 货源山寨倾向（-1~1）；
  * risk 赊账赖账倍率（1 为普通，2 为双倍赖账率）；likes 偏好品类 */
 const REGULARS = [
   { id: 'laozhou', name: '老周', avatar: '🧓', role: '集邮老手',
     lines: { sell: '小老板，看看我这老物件，都是压箱底的。', buy: '这件我惦记好几天了，给个实在价。', credit: '先记账上，我老周的招牌还能不值这点钱？' },
-    patience: 0, fakeBias: -0.5, risk: 1, likes: ['收藏'], favItems: ['youpiao', 'jinianci'] },
+    profile: 'elder', patience: 0, fakeBias: -0.5, risk: 1, likes: ['收藏'], favItems: ['youpiao', 'jinianci'] },
   { id: 'guifen', name: '桂芬婶', avatar: '👵', role: '砍价高手',
     lines: { sell: '家里收拾出来的，你可别想蒙婶子。', buy: '再便宜点，婶子可是天天来捧场的。', credit: '婶子先记着，卖了菜就来还你。' },
-    patience: -1, fakeBias: 0, risk: 1, likes: ['日用', '电器'], favItems: ['tangcibei', 'shouyinji'] },
+    profile: 'auntie', patience: -1, fakeBias: 0, risk: 1, likes: ['日用', '电器'], favItems: ['tangcibei', 'shouyinji'] },
   { id: 'xiaodoubao', name: '小豆包', avatar: '🧒', role: '小学生',
     lines: { sell: '姐姐，我拿零花钱换的宝贝卖给你。', buy: '哇！这个我要攒钱买，求你别卖给别人。', credit: '我先记账，放学让我妈来给钱，行不行嘛。' },
-    patience: +1, fakeBias: 0, risk: 1, likes: ['玩具', '卡牌'], favItems: ['danzhu', 'shanka'] },
+    profile: 'child', patience: +1, fakeBias: 0, risk: 1, likes: ['玩具', '卡牌'], favItems: ['danzhu', 'shanka'] },
   { id: 'qiangzi', name: '强子', avatar: '🧑', role: '鞋表贩子',
     lines: { sell: '渠道货，懂的都懂，价格好说。', buy: '痛快点，这件我转手就能出去。', credit: '兄弟之间先记着，周转开了马上还。' },
-    patience: 0, fakeBias: +0.6, risk: 2, likes: ['潮流'], favItems: ['shanzhaibiao', 'shanzhaixie'] },
+    profile: 'youngMan', patience: 0, fakeBias: +0.6, risk: 2, likes: ['潮流'], favItems: ['shanzhaibiao', 'shanzhaixie'] },
   { id: 'sundaye', name: '孙大爷', avatar: '👴', role: '老街坊',
     lines: { sell: '年纪大了，留着也是留着，你给个公道价。', buy: '这东西有年头了，我就好这一口。', credit: '先记账上，我遛弯回来就给你送来。' },
-    patience: +1, fakeBias: -0.3, risk: 1, likes: ['收藏', '文具'], favItems: ['lianhuanhua', 'huaibiao'] },
+    profile: 'elder', patience: +1, fakeBias: -0.3, risk: 1, likes: ['收藏', '文具'], favItems: ['lianhuanhua', 'huaibiao'] },
 ];
 
 /* ---------------- 普通顾客池 ---------------- */
@@ -118,13 +148,13 @@ const SELLERS = [
   { name: '隔壁班女生', avatar: '👧', line: '同款买重了，这个转给你。' },
 ];
 const BUYERS = [
-  { name: '放学的小学生', avatar: '🎒', line: '就这个！我看中好久了。' },
-  { name: '来接孩子的爸爸', avatar: '👨', line: '孩子闹着要，给我拿那个。' },
-  { name: '怀旧的年轻人', avatar: '🧑', line: '哎哟，这可是我小时候的梦。' },
-  { name: '精打细算的阿姨', avatar: '👩‍🦰', line: '这件多少钱？合适我就拿了。' },
-  { name: '来买文具的女生', avatar: '👧', line: '我来看看今天有什么。' },
-  { name: '刚打完球的学生', avatar: '🏀', line: '打完球想买点吃的。' },
-  { name: '修车的许师傅', avatar: '🧰', line: '刚忙完，来看看。' },
+  { name: '放学的小学生', avatar: '🎒', profile: 'child', line: '就这个！我看中好久了。' },
+  { name: '来接孩子的爸爸', avatar: '👨', profile: 'adult', line: '孩子闹着要，给我拿那个。' },
+  { name: '怀旧的年轻人', avatar: '🧑', profile: 'youngMan', line: '哎哟，这可是我小时候的梦。' },
+  { name: '精打细算的阿姨', avatar: '👩‍🦰', profile: 'auntie', line: '这件多少钱？合适我就拿了。' },
+  { name: '来买文具的女生', avatar: '👧', profile: 'student', line: '我来看看今天有什么。' },
+  { name: '刚打完球的学生', avatar: '🏀', profile: 'student', line: '打完球想买点吃的。' },
+  { name: '修车的许师傅', avatar: '🧰', profile: 'adult', line: '刚忙完，来看看。' },
 ];
 const COLLECTOR = { name: '神秘收藏家', avatar: '🕶️', line: '听说你这儿有好货，我专程来的。钱不是问题，要真东西。' };
 
@@ -510,7 +540,7 @@ const SERVICE_NAMES = {
   ledger: '熟客赊账', sticker: '集贴纸', premium: '高价货交易', grill: '烤肠机',
 };
 const TUTORIALS = [
-  { id: 'opening', title: '第一次开店', tab: 'wholesale', action: '去备货', text: '先向供货商订一批干脆面或汽水，再点「开店」。点窗前的顾客，按要求拿货、确认小票。接待完就可以收摊。' },
+  { id: 'opening', title: '第一次开店', tab: 'wholesale', action: '去备货', text: '先向供货商订一批干脆面或汽水，再点「开店」。顾客会自动走到柜台并开口，按要求拿货、确认小票。接待完就可以收摊。' },
   { id: 'organizer', unlock: 'organizer', title: '请小梁帮忙宣传', text: '点右上角「社区小梁」，付费后当天多来两位买家。每天可宣传一次。' },
   { id: 'marbles', unlock: 'clearance', title: '供货商上新 · 玻璃弹珠', tab: 'wholesale', action: '看新货', text: '供货商现在能订玻璃弹珠。点商品下方的进货按钮订一批，之后可在柜台卖出。' },
   { id: 'clearance', unlock: 'clearance', title: '处理临期食品', text: '有临期库存时，接待页面会出现促销区。点商品加到小票，默认是货架标价的七五折。顾客点名时仍要按要求拿货。' },

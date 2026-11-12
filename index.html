@@ -34,6 +34,7 @@
     </div>
   </dialog>
   <div id="shop-notice" class="shop-notice" role="alert"></div>
+  <div id="cash-feedback" class="cash-feedback" role="status" aria-live="polite"></div>
 
   <dialog id="event-dialog" aria-labelledby="event-heading" aria-describedby="event-message">
     <h2 id="event-heading">柜台消息</h2>
@@ -53,7 +54,7 @@
     <div class="top-actions">
       <button id="btn-openday" class="btn gold">开店</button>
       <button id="btn-endday" class="btn primary hidden">🌙 收摊结算</button>
-      <button id="music-toggle" class="btn" aria-label="背景音乐" aria-pressed="false">音乐</button><label class="volume-control">音量 <input id="music-volume" type="range" min="0" max="100" value="70"></label><button id="open-title" class="btn">主菜单</button>
+      <button id="music-toggle" class="btn" aria-label="背景音乐" aria-pressed="false">音乐</button><label class="volume-control">音量 <input id="music-volume" type="range" min="0" max="100" value="70"></label><button id="open-dev" class="btn dev-only hidden">开发测试</button><button id="open-title" class="btn">主菜单</button>
     </div>
   </header>
 
@@ -79,8 +80,8 @@
           <img class="street-background night" src="assets/school-window-night.png" alt="">
         </div>
         <div class="walkers" aria-hidden="true">
-          <span class="walker"><i class="person"><i class="walker-leg"></i><i class="walker-leg back"></i></i></span>
-          <span class="walker walker-second"><i class="person"><i class="walker-leg"></i><i class="walker-leg back"></i></i></span>
+          <span class="walker"><i class="walker-art walker-student"></i></span>
+          <span class="walker walker-second"><i class="walker-art walker-neighbor"></i></span>
         </div>
         <button type="button" id="guest-call" class="guest-call hidden" aria-controls="counter trade-dialogue" aria-expanded="false">
           <span id="portrait-frame" class="portrait-frame" aria-hidden="true"></span>
@@ -131,7 +132,7 @@
       <section id="counter" class="trade-stage hidden" aria-label="柜台交易">
         <section id="visitor-area" aria-label="交易信息"></section>
         <p id="trade-guide" class="hidden"></p>
-        <section id="action-area" aria-label="交易操作"></section>
+        <section id="action-area" tabindex="-1" aria-label="交易操作"></section>
       </section>
     </section>
 
@@ -181,6 +182,44 @@
       </header>
       <ul id="log"></ul>
     </div>
+  </dialog>
+
+  <dialog id="dev-panel" aria-labelledby="dev-heading">
+    <header class="dev-header">
+      <div><small>仅开发版本</small><h2 id="dev-heading">开发者测试台</h2></div>
+      <button id="close-dev" type="button" class="btn small">关闭</button>
+    </header>
+    <p id="dev-status" class="mut"></p>
+    <section class="dev-section">
+      <h3>进度阶段</h3>
+      <div id="dev-stages" class="dev-grid"></div>
+    </section>
+    <section class="dev-section">
+      <h3>资源与顾客</h3>
+      <div class="dev-grid">
+        <button type="button" class="btn" onclick="devGrantResources()">补齐资金与商品</button>
+        <button type="button" class="btn" onclick="devMeetVisitor('buyer')">立即测试买家</button>
+        <button type="button" class="btn" onclick="devMeetVisitor('buyer','child')">测试小学生</button>
+        <button type="button" class="btn" onclick="devMeetVisitor('buyer','auntie')">测试大婶议价</button>
+        <button type="button" class="btn" onclick="devMeetVisitor('buyer','youngMan')">测试青年男生</button>
+        <button type="button" class="btn" onclick="devMeetVisitor('seller')">立即测试卖家</button>
+        <button type="button" class="btn" onclick="devMeetVisitor('credit')">立即测试赊账</button>
+      </div>
+    </section>
+    <section class="dev-section">
+      <h3>收摊事件</h3>
+      <div class="dev-grid">
+        <button type="button" class="btn" onclick="devRunSettlement('rent')">房租日</button>
+        <button type="button" class="btn" onclick="devRunSettlement('sticker-redeem')">贴纸兑付</button>
+        <button type="button" class="btn" onclick="devRunSettlement('sticker-complaint')">贴纸投诉</button>
+        <button type="button" class="btn" onclick="devRunSettlement('credit-repay')">赊账还款</button>
+        <button type="button" class="btn" onclick="devRunSettlement('credit-default')">赊账赖账</button>
+      </div>
+    </section>
+    <section class="dev-section">
+      <h3>烤肠机火候</h3>
+      <div id="dev-grill-stages" class="dev-grid"></div>
+    </section>
   </dialog>
 
   <!-- 结算弹窗 -->
