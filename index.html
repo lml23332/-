@@ -47,6 +47,7 @@
     <div class="brand" id="shop-sign">校门口小卖部</div>
     <div class="stats">
       <span class="stat" id="stat-day">第 1 天</span>
+      <button id="open-calendar" class="btn small" type="button" aria-haspopup="dialog">日历</button>
       <span class="stat money" id="stat-money">💰 ¥250</span>
       <span class="stat" id="stat-rep">😊 口碑 0</span>
       <span class="stat goal" id="stat-goal">🎯 盘下店面 ¥250 / ¥3000</span>
@@ -173,6 +174,11 @@
       <input id="shop-name" type="text" required>
       <button class="btn gold">挂上招牌</button>
     </form>
+  </dialog>
+  <dialog id="calendar-dialog" class="shop-service-dialog" aria-labelledby="calendar-title">
+    <h2 id="calendar-title">营业日历</h2>
+    <div id="calendar-content"></div>
+    <form method="dialog"><button class="btn small">返回柜台</button></form>
   </dialog>
   <dialog id="shop-service" class="shop-service-dialog" aria-labelledby="shop-service-title">
     <div id="shop-service-content"></div>
