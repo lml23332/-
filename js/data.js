@@ -86,7 +86,7 @@ const DEV_CONFIG = {
   stockEach: 2,
   stockCostMultiplier: .4,
   creditAmount: 42,
-  stages: ['opening', 'clearance', 'receiving', 'ledger', 'sticker', 'premium', 'grill'],
+  stages: ['opening', 'clearance', 'receiving', 'ledger', 'sticker', 'premium', 'grill', 'delivery'],
 };
 
 /* ---------------- 定价策略（三档） ----------------
@@ -112,7 +112,7 @@ const BUYER_PROFILES = {
   child:    { name: '小学生', budgetMult: .68, haggleChance: .08, rounds: [1, 1], target: [.94, .98] },
   student:  { name: '学生', budgetMult: .82, haggleChance: .18, rounds: [1, 2], target: [.90, .97] },
   youngMan: { name: '青年男生', budgetMult: 1.05, haggleChance: .48, rounds: [2, 2], target: [.88, .95] },
-  auntie:   { name: '大婶', budgetMult: 1.00, haggleChance: .86, rounds: [4, 5], target: [.78, .88] },
+  auntie:   { name: '街坊阿姨', budgetMult: 1.00, haggleChance: .86, rounds: [4, 5], target: [.78, .88] },
   adult:    { name: '普通顾客', budgetMult: 1.00, haggleChance: .34, rounds: [2, 3], target: [.87, .95] },
   elder:    { name: '老街坊', budgetMult: .95, haggleChance: .52, rounds: [3, 4], target: [.83, .92] },
 };
@@ -121,19 +121,19 @@ const BUYER_PROFILES = {
  * favor 好感度；patience 砍价耐心修正；fakeBias 货源山寨倾向（-1~1）；
  * risk 赊账赖账倍率（1 为普通，2 为双倍赖账率）；likes 偏好品类 */
 const REGULARS = [
-  { id: 'laozhou', name: '老周', avatar: '🧓', role: '集邮老手',
+  { id: 'laozhou', profile: 'elder', name: '老周', avatar: '🧓', role: '集邮老手',
     lines: { sell: '小老板，看看我这老物件，都是压箱底的。', buy: '这件我惦记好几天了，给个实在价。', credit: '先记账上，我老周的招牌还能不值这点钱？' },
     profile: 'elder', patience: 0, fakeBias: -0.5, risk: 1, likes: ['收藏'], favItems: ['youpiao', 'jinianci'] },
-  { id: 'guifen', name: '桂芬婶', avatar: '👵', role: '砍价高手',
+  { id: 'guifen', profile: 'auntie', name: '桂芬婶', avatar: '👵', role: '砍价高手',
     lines: { sell: '家里收拾出来的，你可别想蒙婶子。', buy: '再便宜点，婶子可是天天来捧场的。', credit: '婶子先记着，卖了菜就来还你。' },
     profile: 'auntie', patience: -1, fakeBias: 0, risk: 1, likes: ['日用', '电器'], favItems: ['tangcibei', 'shouyinji'] },
-  { id: 'xiaodoubao', name: '小豆包', avatar: '🧒', role: '小学生',
+  { id: 'xiaodoubao', profile: 'child', name: '小豆包', avatar: '🧒', role: '小学生',
     lines: { sell: '姐姐，我拿零花钱换的宝贝卖给你。', buy: '哇！这个我要攒钱买，求你别卖给别人。', credit: '我先记账，放学让我妈来给钱，行不行嘛。' },
     profile: 'child', patience: +1, fakeBias: 0, risk: 1, likes: ['玩具', '卡牌'], favItems: ['danzhu', 'shanka'] },
-  { id: 'qiangzi', name: '强子', avatar: '🧑', role: '鞋表贩子',
+  { id: 'qiangzi', profile: 'youngMan', name: '强子', avatar: '🧑', role: '鞋表贩子',
     lines: { sell: '渠道货，懂的都懂，价格好说。', buy: '痛快点，这件我转手就能出去。', credit: '兄弟之间先记着，周转开了马上还。' },
     profile: 'youngMan', patience: 0, fakeBias: +0.6, risk: 2, likes: ['潮流'], favItems: ['shanzhaibiao', 'shanzhaixie'] },
-  { id: 'sundaye', name: '孙大爷', avatar: '👴', role: '老街坊',
+  { id: 'sundaye', profile: 'elder', name: '孙大爷', avatar: '👴', role: '老街坊',
     lines: { sell: '年纪大了，留着也是留着，你给个公道价。', buy: '这东西有年头了，我就好这一口。', credit: '先记账上，我遛弯回来就给你送来。' },
     profile: 'elder', patience: +1, fakeBias: -0.3, risk: 1, likes: ['收藏', '文具'], favItems: ['lianhuanhua', 'huaibiao'] },
 ];
@@ -200,7 +200,7 @@ const STICKER = {
  * base：真品真值的基础价区间；checks 恰好 4 条：
  * [检查点, 真品线索, 山寨线索, 残次线索]——只暗示，不下结论。 */
 const ITEMS = [
-  { id: 'shanka', name: '干脆面闪卡', emoji: '🃏', cat: '卡牌', base: [20, 80],
+  { id: 'shanka', footprint: { w: 1, h: 1 }, name: '干脆面闪卡', emoji: '🃏', cat: '卡牌', base: [20, 80],
     flavor: '干脆面里摸出来的闪卡，一张稀有卡能换一周零花钱。',
     checks: [
       ['卡面印刷', '闪粉均匀，人物线条锐利', '闪粉发灰，线条有点糊', '印刷没毛病，就是卡面有道折痕'],
@@ -208,7 +208,7 @@ const ITEMS = [
       ['镭射膜', '晃一晃彩虹纹流动自然', '彩虹纹呆板，角度不对就发暗', '膜面完好，只是沾了点油渍'],
       ['边角', '四角尖挺，没有毛边', '切边毛糙，有轻微分层', '有一个角磨圆了']],
   },
-  { id: 'baowan', name: '弹开球', emoji: '🔮', cat: '玩具', base: [25, 70],
+  { id: 'baowan', footprint: { w: 1, h: 1 }, name: '弹开球', emoji: '🔮', cat: '玩具', base: [25, 70],
     flavor: '滚过磁卡「啪」地弹开变身，当年在校门口能横着走。',
     checks: [
       ['磁吸感应', '贴近磁卡立刻有吸力', '吸力若有似无，要凑很近', '吸力正常，但反应慢半拍'],
@@ -216,7 +216,7 @@ const ITEMS = [
       ['接缝', '接缝严密，摸不到毛刺', '接缝对不齐，缝隙能塞指甲', '接缝没问题，表面有磕碰白点'],
       ['球身印刷', '图案清晰，配色正', '图案偏色，边缘溢墨', '印刷清楚，就是贴纸翘边了']],
   },
-  { id: 'tuoluo', name: '战斗陀螺', emoji: '🌀', cat: '玩具', base: [20, 60],
+  { id: 'tuoluo', footprint: { w: 1, h: 1 }, name: '战斗陀螺', emoji: '🌀', cat: '玩具', base: [20, 60],
     flavor: '金属环越重越能打，午休走廊天天开赛。',
     checks: [
       ['战斗环重量', '掂着压手，金属感扎实', '轻飘飘的，像全塑料的', '重量够，就是环边有磕痕'],
@@ -224,7 +224,7 @@ const ITEMS = [
       ['发射器齿条', '齿口完整，拉动有劲', '齿口发白，有崩齿', '齿条完好，拉绳有点起毛'],
       ['表面印刷', '标志清晰，电镀均匀', '标志字母间距怪，电镀发乌', '印刷没毛病，贴纸被撕掉一半']],
   },
-  { id: 'siduche', name: '四驱车', emoji: '🏎️', cat: '玩具', base: [60, 160],
+  { id: 'siduche', footprint: { w: 2, h: 1 }, name: '四驱车', emoji: '🏎️', cat: '玩具', base: [60, 160],
     flavor: '校门口改装大赛的硬通货，马达和导轮都是钱。',
     checks: [
       ['车壳印刷', '字迹锐利，贴纸对位准', '贴纸歪斜，颜色发闷', '印刷没毛病，壳角有道裂纹'],
@@ -232,7 +232,7 @@ const ITEMS = [
       ['马达标签', '标签字体工整，铜线发亮', '标签糊成一团，铜线发黑', '标签在，就是转起来声音发闷'],
       ['导轮做工', '导轮顺滑无毛刺', '导轮晃动，塑料毛刺多', '导轮顺滑，但缺了一颗螺丝']],
   },
-  { id: 'youyouqiu', name: '悠悠球', emoji: '🪀', cat: '玩具', base: [10, 35],
+  { id: 'youyouqiu', footprint: { w: 1, h: 1 }, name: '悠悠球', emoji: '🪀', cat: '玩具', base: [10, 35],
     flavor: '睡眠时间越长越神气，绳子都是自己换的。',
     checks: [
       ['轴承', '空转时间长，几乎没声', '转两下就停，还偏心晃', '转得顺，就是轴承有点锈点'],
@@ -240,7 +240,7 @@ const ITEMS = [
       ['绳槽', '槽口光滑不磨绳', '槽口有毛刺，绳子起毛', '槽口完好，原配绳子快断了'],
       ['外观', '漆面亮，图案正', '漆面发雾，图案偏位', '漆没毛病，边上有掉漆']],
   },
-  { id: 'youxiji', name: '掌上游戏机', emoji: '🎮', cat: '电器', base: [80, 220],
+  { id: 'youxiji', footprint: { w: 2, h: 2 }, name: '掌上游戏机', emoji: '🎮', cat: '电器', base: [80, 220],
     flavor: '被窝里的快乐源泉，没收名单上的头号通缉犯。',
     checks: [
       ['屏幕', '点亮无坏点，背光均匀', '屏幕发黄，边缘有暗斑', '显示正常，就是屏面有划痕'],
@@ -248,7 +248,7 @@ const ITEMS = [
       ['电池仓', '触点干净，仓盖严实', '触点发绿，像漏过液', '仓里干净，就是盖子松了'],
       ['外壳刻字', '刻字清晰，螺丝是十字口', '刻字模糊，螺丝口型对不上', '刻字没问题，壳角有摔裂']],
   },
-  { id: 'cidai', name: '磁带', emoji: '📼', cat: '电器', base: [8, 30],
+  { id: 'cidai', footprint: { w: 1, h: 1 }, name: '磁带', emoji: '📼', cat: '电器', base: [8, 30],
     flavor: '铅笔是它的专属维修工具，A 面第一首最经典。',
     checks: [
       ['带芯', '磁带平整，没有起皱', '带子有点松，边缘发毛', '带子没问题，就是中段有一处接痕'],
@@ -256,7 +256,7 @@ const ITEMS = [
       ['标签纸', '字迹工整，贴得端正', '标签歪贴，字迹像描的', '标签在，就是有点受潮起泡'],
       ['窗口', '窗口干净，能看清带量', '窗口全是灰，毛毛的', '窗口清晰，压带毡有点脱落']],
   },
-  { id: 'suishenting', name: '随身听', emoji: '🎧', cat: '电器', base: [50, 150],
+  { id: 'suishenting', footprint: { w: 2, h: 1 }, name: '随身听', emoji: '🎧', cat: '电器', base: [50, 150],
     flavor: '挂在腰间最拉风，磁带转起来青春就转起来。',
     checks: [
       ['试听', '声音干净，左右声道齐', '一边声音小，还带电流声', '声音正常，快进时有点飘'],
@@ -264,7 +264,7 @@ const ITEMS = [
       ['电池仓', '仓内干净无锈', '触点有白霜，漏过液', '仓内干净，盖子扣不紧'],
       ['机身刻字', '刻字工整，皮带扣锃亮', '刻字浅，字体还不对版', '刻字没问题，机身有道深划痕']],
   },
-  { id: 'shanzhaibiao', name: '山寨名表', emoji: '⌚', cat: '潮流', base: [100, 300],
+  { id: 'shanzhaibiao', footprint: { w: 1, h: 1 }, name: '山寨名表', emoji: '⌚', cat: '潮流', base: [100, 300],
     flavor: '十个人里九个看不出真假，剩下那个是卖表的。',
     checks: [
       ['表盘刻字', '刻字立体，夜光涂得均匀——慢着，这做工不像仿的', '字母挤成一团，有个字母还印反了', '刻字没毛病，表盘里进了点灰'],
@@ -272,7 +272,7 @@ const ITEMS = [
       ['表带', '表带沉手，扣具咬合紧', '表带轻得发飘，边角割手', '表带没问题，针扣有点松'],
       ['表镜', '表镜通透，侧光没有发蓝边', '表镜发雾，边缘一圈蓝光', '表镜清楚，就是有一道细划痕']],
   },
-  { id: 'gangbi', name: '老式钢笔', emoji: '🖊️', cat: '文具', base: [15, 50],
+  { id: 'gangbi', footprint: { w: 1, h: 2 }, name: '老式钢笔', emoji: '🖊️', cat: '文具', base: [15, 50],
     flavor: '吸满一管墨水，能写完整个暑假作业。',
     checks: [
       ['笔尖', '笔尖刻字清楚，铱点圆润', '笔尖偏软，刻字模糊', '笔尖没问题，就是有点挂纸'],
@@ -280,7 +280,7 @@ const ITEMS = [
       ['上墨器', '推拉顺滑，不漏墨', '推拉发涩，接口渗墨', '上墨正常，储墨管有点老化发黄'],
       ['笔杆', '笔杆漆面亮，无磕碰', '漆面发乌，logo 印歪了', '笔杆完好，尾部有小磕痕']],
   },
-  { id: 'lianhuanhua', name: '连环画', emoji: '📚', cat: '收藏', base: [20, 90],
+  { id: 'lianhuanhua', footprint: { w: 1, h: 2 }, name: '连环画', emoji: '📚', cat: '收藏', base: [20, 90],
     flavor: '小人书，一毛钱能租一下午的精神食粮。',
     checks: [
       ['封面', '色彩鲜亮，品相挺括', '颜色发灰，像是翻印的', '封面完整，就是边角卷了'],
@@ -288,7 +288,7 @@ const ITEMS = [
       ['装订', '订书钉原装，没有锈', '钉子是后换的，位置还偏了', '装订牢固，书脊有点开胶'],
       ['出版信息', '版次印次清楚，老出版社', '信息页字迹模糊，对不上版', '信息齐全，就是扉页有个章']],
   },
-  { id: 'danzhu', name: '玻璃弹珠', emoji: '🔵', cat: '玩具', base: [3, 12],
+  { id: 'danzhu', footprint: { w: 1, h: 1 }, name: '玻璃弹珠', emoji: '🔵', cat: '玩具', base: [3, 12],
     flavor: '赢来的弹珠要单独装一罐，那是战绩。',
     checks: [
       ['花纹', '内花居中，颜色透亮', '花纹偏心，颜色发浊', '花纹没问题，表面有小坑'],
@@ -296,7 +296,7 @@ const ITEMS = [
       ['圆度', '滚起来笔直不跑偏', '滚起来一歪一歪的', '圆度够，就是沾了洗不掉的渍'],
       ['透光', '对光看通透均匀', '透光发闷，中间有杂质', '通透没问题，边上有磕点']],
   },
-  { id: 'kadai', name: '游戏卡带', emoji: '👾', cat: '电器', base: [30, 120],
+  { id: 'kadai', footprint: { w: 1, h: 1 }, name: '游戏卡带', emoji: '👾', cat: '电器', base: [30, 120],
     flavor: '吹一吹再插，是每个玩家都懂的开机仪式。',
     checks: [
       ['标签贴纸', '贴纸平整，原版字体', '贴纸发鼓，字体对不上', '贴纸完整，就是边角翘起'],
@@ -304,7 +304,7 @@ const ITEMS = [
       ['外壳螺丝', '三角螺丝，原装口型', '螺丝是十字口，后换的', '螺丝齐全，壳体有撬痕'],
       ['摇晃', '摇起来没杂音，板子固定', '里面哗啦响，板子是松的', '没有杂音，就是壳有点松动']],
   },
-  { id: 'chongwuji', name: '电子宠物机', emoji: '🐣', cat: '电器', base: [25, 80],
+  { id: 'chongwuji', footprint: { w: 1, h: 1 }, name: '电子宠物机', emoji: '🐣', cat: '电器', base: [25, 80],
     flavor: '上课都要惦记喂它，死了能哭一下午。',
     checks: [
       ['屏幕', '像素点齐全，图案清楚', '屏幕发淡，缺了好几行点', '显示正常，屏面有细划痕'],
@@ -312,7 +312,7 @@ const ITEMS = [
       ['电池盖', '盖子严实，螺丝在', '盖子是后配的，颜色对不上', '盖子原装，就是有点松'],
       ['挂链孔', '孔位完整，没有裂', '孔边发白，像要断', '孔位完好，链子不是原配']],
   },
-  { id: 'youpiao', name: '邮票', emoji: '✉️', cat: '收藏', base: [40, 200],
+  { id: 'youpiao', footprint: { w: 1, h: 1 }, name: '邮票', emoji: '✉️', cat: '收藏', base: [40, 200],
     flavor: '老周说，方寸之间装得下整个世界。',
     checks: [
       ['齿孔', '齿孔完整均匀，没有缺齿', '齿孔参差，像是自己剪的', '齿孔齐全，就是一枚角折了'],
@@ -324,7 +324,7 @@ const ITEMS = [
 
 /* 物品库续（16–29） */
 ITEMS.push(
-  { id: 'shouyinji', name: '旧收音机', emoji: '📻', cat: '电器', base: [35, 110],
+  { id: 'shouyinji', footprint: { w: 2, h: 2 }, name: '旧收音机', emoji: '📻', cat: '电器', base: [35, 110],
     flavor: '旋钮拧到沙沙响，评书和天气预报都在里面。',
     checks: [
       ['旋钮', '旋钮阻尼均匀，刻度对得准', '旋钮打滑，刻度盘是贴上去的', '旋钮能用，就是有点松旷'],
@@ -332,7 +332,7 @@ ITEMS.push(
       ['喇叭声', '出声洪亮，没有破音', '声音发闷，还带杂音', '声音没问题，音量大时有点震'],
       ['外壳', '木纹漆面完好，边角齐整', '漆面发假，木纹像印的贴纸', '外壳完好，侧面有道磕痕']],
   },
-  { id: 'tangcibei', name: '搪瓷杯', emoji: '☕', cat: '日用', base: [10, 40],
+  { id: 'tangcibei', footprint: { w: 1, h: 1 }, name: '搪瓷杯', emoji: '☕', cat: '日用', base: [10, 40],
     flavor: '磕掉瓷也不漏，大红花图案经久不衰。',
     checks: [
       ['杯口', '杯口一圈光滑，没有崩瓷', '杯口毛糙，像是补过漆', '杯口基本完整，有个小崩点'],
@@ -340,7 +340,7 @@ ITEMS.push(
       ['杯底印记', '底款清晰，老厂出品', '底款模糊，字都连一起了', '底款在，就是磨掉了一半'],
       ['把手', '把手牢固，接缝平整', '把手有点晃，接缝有胶痕', '把手牢固，就是瓷面有裂纹']],
   },
-  { id: 'shanzhaixie', name: '山寨运动鞋', emoji: '👟', cat: '潮流', base: [30, 90],
+  { id: 'shanzhaixie', footprint: { w: 2, h: 1 }, name: '山寨运动鞋', emoji: '👟', cat: '潮流', base: [30, 90],
     flavor: '远远看一模一样，近看字母多一笔。',
     checks: [
       ['鞋标', '标织得工整，字母一个不多一个不少', '字母多了一笔，产地写得含糊', '鞋标没问题，就是有点起毛'],
@@ -348,7 +348,7 @@ ITEMS.push(
       ['鞋底', '纹路深，材质有弹性', '鞋底发硬，纹路浅得像印的', '鞋底没问题，后跟磨偏了一点'],
       ['鞋盒', '盒标印刷清楚，码数齐全', '盒子软塌，印刷还偏色', '鞋盒完整，就是边角压扁了']],
   },
-  { id: 'youxiwangka', name: '对战卡牌', emoji: '🂡', cat: '卡牌', base: [15, 70],
+  { id: 'youxiwangka', footprint: { w: 1, h: 1 }, name: '对战卡牌', emoji: '🂡', cat: '卡牌', base: [15, 70],
     flavor: '金字红字分等级，一张金闪能换一堆散卡。',
     checks: [
       ['镭射防伪', '右下角镭射方块角度正', '镭射发暗，图案对不上', '镭射没问题，卡面有指纹印'],
@@ -356,7 +356,7 @@ ITEMS.push(
       ['边角', '四角尖挺，白边均匀', '切边毛糙，白边宽窄不一', '有一个角轻微折痕'],
       ['卡背', '背面色泽均匀，logo 清晰', '背面偏色，logo 发虚', '卡背完好，有轻微划痕']],
   },
-  { id: 'cidianci', name: '电子词典', emoji: '📟', cat: '电器', base: [40, 130],
+  { id: 'cidianci', footprint: { w: 2, h: 1 }, name: '电子词典', emoji: '📟', cat: '电器', base: [40, 130],
     flavor: '查单词是假，打小游戏是真。',
     checks: [
       ['键盘', '按键回弹好，字母没磨损', '几个键按下去没反应', '按键都灵，字母磨掉几个'],
@@ -364,7 +364,7 @@ ITEMS.push(
       ['翻盖轴', '开合顺滑，能任意角度停', '翻盖松垮，停不住', '开合没问题，轴有点异响'],
       ['机身刻字', '品牌刻字清晰，字体正', '刻字模糊，型号对不上', '刻字没问题，外壳有划痕']],
   },
-  { id: 'xiangji', name: '老式照相机', emoji: '📷', cat: '收藏', base: [60, 180],
+  { id: 'xiangji', footprint: { w: 2, h: 3 }, name: '老式照相机', emoji: '📷', cat: '收藏', base: [60, 180],
     flavor: '快门一响，黄金万两——当年可是大件。',
     checks: [
       ['镜头', '镜片通透，没有霉斑', '镜片发雾，里面像有哈气', '镜片干净，就是边缘有小霉点'],
@@ -372,7 +372,7 @@ ITEMS.push(
       ['机身', '皮革贴面完整，金属件亮', '贴面像是翻新的，胶边外翻', '机身完好，背带环磨损'],
       ['刻字', '机顶刻字深峻，字体老派', '刻字浅，字体版本不对', '刻字没问题，漆边有磕碰']],
   },
-  { id: 'fuduji', name: '复读机', emoji: '🔁', cat: '电器', base: [45, 120],
+  { id: 'fuduji', footprint: { w: 2, h: 2 }, name: '复读机', emoji: '🔁', cat: '电器', base: [45, 120],
     flavor: '英语听力全靠它，跟读功能拯救过无数早读。',
     checks: [
       ['磁头', '磁头光亮，磨损均匀', '磁头锈迹斑斑', '磁头没问题，压带轮老化了'],
@@ -380,7 +380,7 @@ ITEMS.push(
       ['喇叭', '人声清楚，没有破音', '声音发劈，底噪大', '声音正常，音量旋钮有点沙'],
       ['外壳', '壳体严实，电池盖在', '外壳发黄不均，像是拼装的', '外壳完好，提手裂了']],
   },
-  { id: 'shouban', name: '模型手办', emoji: '🧸', cat: '玩具', base: [30, 110],
+  { id: 'shouban', footprint: { w: 2, h: 2 }, name: '模型手办', emoji: '🧸', cat: '玩具', base: [30, 110],
     flavor: '摆在柜台最显眼的位置，懂的人自然会问价。',
     checks: [
       ['涂装', '涂装细腻，没有溢色', '涂装粗糙，眼睛都画歪了', '涂装没问题，武器尖有点掉漆'],
@@ -388,7 +388,7 @@ ITEMS.push(
       ['底座刻字', '底座有编号刻字，字体工整', '底座光秃秃，什么都没有', '刻字在，就是底座有划痕'],
       ['配件', '配件齐全，替换手都在', '配件缺了关键的一件', '配件在，就是小零件有白痕']],
   },
-  { id: 'jinianci', name: '纪念币', emoji: '🪙', cat: '收藏', base: [50, 250],
+  { id: 'jinianci', footprint: { w: 1, h: 1 }, name: '纪念币', emoji: '🪙', cat: '收藏', base: [50, 250],
     flavor: '带证书的老纪念币，是收藏家蹲点等的东西。',
     checks: [
       ['边齿', '边齿均匀整齐，滚字清晰', '边齿发毛，像是压铸的', '边齿齐全，就是有一处磕碰'],
@@ -396,7 +396,7 @@ ITEMS.push(
       ['包浆', '包浆自然温润，是岁月的', '颜色浮在表面，像是做旧的', '包浆自然，就是有一小块擦痕'],
       ['证书', '证书纸张老道，编号对得上', '证书像新打印的，编号对不上', '证书齐全，就是折过一道']],
   },
-  { id: 'huaban', name: '滑板', emoji: '🛹', cat: '潮流', base: [40, 120],
+  { id: 'huaban', footprint: { w: 2, h: 3 }, name: '滑板', emoji: '🛹', cat: '潮流', base: [40, 120],
     flavor: '校门口空地上的风云人物同款，豚跳要练一夏天。',
     checks: [
       ['板面', '砂纸粗粝均匀，板型对称', '砂纸发滑，板面有点歪', '板面没问题，板尾磨秃了'],
@@ -404,7 +404,7 @@ ITEMS.push(
       ['桥', '桥体扎实，螺丝齐全', '桥身轻飘，螺丝是后配的', '桥没问题，主钉有点松'],
       ['图案', '板底图案鲜艳完整', '图案偏色，还有重影', '图案在，就是刮花了几道']],
   },
-  { id: 'kouqin', name: '口琴', emoji: '🎵', cat: '文具', base: [12, 45],
+  { id: 'kouqin', footprint: { w: 1, h: 2 }, name: '口琴', emoji: '🎵', cat: '文具', base: [12, 45],
     flavor: '十孔口琴，吹一首《小星星》就够在班里出名。',
     checks: [
       ['试音', '高低音都准，没有哑音', '有两个孔发哑，还漏气', '音准没问题，就是高音有点紧'],
@@ -412,7 +412,7 @@ ITEMS.push(
       ['琴格', '琴格光滑，吹嘴不刮嘴', '琴格毛糙，边上有裂', '琴格没问题，螺丝有点锈'],
       ['簧片', '透光看簧片齐整无歪斜', '簧片有一片歪了', '簧片齐整，就是积了点灰']],
   },
-  { id: 'huaibiao', name: '老怀表', emoji: '🕰️', cat: '收藏', base: [70, 220],
+  { id: 'huaibiao', footprint: { w: 1, h: 1 }, name: '老怀表', emoji: '🕰️', cat: '收藏', base: [70, 220],
     flavor: '孙大爷的同款爱好，链子一挂，年头就出来了。',
     checks: [
       ['表壳', '壳体沉手，花纹深刻', '壳体发轻，花纹像是冲压的', '表壳完好，就是铰链有点松'],
@@ -420,7 +420,7 @@ ITEMS.push(
       ['表盘字', '罗马字工整，珐琅面无裂', '字体发飘，盘面像翻印的', '表盘没问题，有一道发丝裂'],
       ['盖内刻字', '盖内有匠人刻记，年份对得上', '盖内光秃，没有刻记', '刻记在，就是磨淡了一点']],
   },
-  { id: 'suanpan', name: '老算盘', emoji: '🧮', cat: '日用', base: [25, 85],
+  { id: 'suanpan', footprint: { w: 2, h: 1 }, name: '老算盘', emoji: '🧮', cat: '日用', base: [25, 85],
     flavor: '十三档老算盘，老会计的手感都在珠子里。',
     checks: [
       ['档杆', '档杆笔直，珠子滑动顺畅', '档杆有点弯，珠子发涩', '档杆没问题，就是一根有锈点'],
@@ -428,7 +428,7 @@ ITEMS.push(
       ['框料', '边框老木料，包浆厚实', '木料发新，漆味还没散', '边框完好，角上有磕痕'],
       ['刻字', '梁上有老字号刻字', '没有任何刻字，来历不明', '刻字在，就是淡得快看不清']],
   },
-  { id: 'jinianzhang', name: '纪念章', emoji: '🎖️', cat: '收藏', base: [10, 35],
+  { id: 'jinianzhang', footprint: { w: 1, h: 1 }, name: '纪念章', emoji: '🎖️', cat: '收藏', base: [10, 35],
     flavor: '一枚小章一个故事，老一辈的抽屉里总有几枚。',
     checks: [
       ['浮雕', '浮雕层次分明，线条利落', '浮雕发平，像是翻模的', '浮雕没问题，表面有擦痕'],
@@ -439,12 +439,102 @@ ITEMS.push(
 );
 
 // 供货商品单独列出，供货商按批销售，顾客按件购买。
+const NEW_GOODS = [
+  { id: 'wh-latiao', footprint: { w: 1, h: 1 }, name: '辣条', cat: '食品', cost: 2, value: 4, pack: 6, life: 10 },
+  { id: 'wh-pear', footprint: { w: 1, h: 2 }, name: '大白梨汽水', cat: '食品', cost: 3, value: 6, pack: 6, life: 7 },
+  { id: 'wh-candy', footprint: { w: 1, h: 1 }, name: '压片糖果', cat: '食品', cost: 2, value: 4, pack: 6, life: 20 },
+  { id: 'wh-choco', footprint: { w: 1, h: 1 }, name: '巧克力', cat: '食品', cost: 4, value: 7, pack: 4, life: 15 },
+  { id: 'wh-eraser', footprint: { w: 1, h: 1 }, name: '橡皮', cat: '文具', cost: 2, value: 4, pack: 5 },
+  { id: 'wh-plasticbook', footprint: { w: 1, h: 1 }, name: '塑胶本', cat: '文具', cost: 4, value: 7, pack: 4 },
+  { id: 'wh-ink', footprint: { w: 1, h: 1 }, name: '墨水瓶', cat: '文具', cost: 4, value: 8, pack: 3 },
+  { id: 'wh-case', footprint: { w: 1, h: 2 }, name: '文具盒', cat: '文具', cost: 6, value: 10, pack: 3 },
+  { id: 'wh-watercolor', footprint: { w: 1, h: 2 }, name: '水彩笔', cat: '文具', cost: 6, value: 11, pack: 3 },
+  { id: 'wh-compass', footprint: { w: 1, h: 2 }, name: '圆规套装', cat: '文具', cost: 5, value: 9, pack: 3 },
+  { id: 'wh-pencil', footprint: { w: 1, h: 2 }, name: '自动铅笔', cat: '文具', cost: 3, value: 6, pack: 4 },
+  { id: 'wh-beanbag', footprint: { w: 1, h: 1 }, name: '沙包', cat: '玩具', cost: 3, value: 6, pack: 4 },
+  { id: 'wh-shuttle', footprint: { w: 1, h: 2 }, name: '毽子', cat: '玩具', cost: 3, value: 6, pack: 4 },
+  { id: 'wh-laser', footprint: { w: 1, h: 2 }, name: '激光笔', cat: '玩具', cost: 7, value: 12, pack: 3 },
+  { id: 'wh-cologne', footprint: { w: 1, h: 2 }, name: '花露水', cat: '日用', cost: 5, value: 9, pack: 3 },
+  { id: 'wh-balm', footprint: { w: 1, h: 1 }, name: '清凉油', cat: '日用', cost: 3, value: 6, pack: 4 },
+  { id: 'wh-clip', footprint: { w: 1, h: 1 }, name: '发卡', cat: '日用', cost: 2, value: 5, pack: 4 },
+  { id: 'wh-battery', footprint: { w: 1, h: 1 }, name: '电池', cat: '日用', cost: 3, value: 6, pack: 4 },
+];
+const EXTRA_GOODS = [
+  { id: 'wh-duel', footprint: { w: 1, h: 1 }, name: '对战卡片包', emoji: '🃏', cat: '卡牌', cost: 3, value: 6, pack: 4 },
+  { id: 'wh-robot', footprint: { w: 2, h: 3 }, name: '变形机器人', emoji: '🤖', cat: '玩具', cost: 9, value: 15, pack: 3 },
+  { id: 'wh-doll', footprint: { w: 2, h: 3 }, name: '换装娃娃', emoji: '🎀', cat: '玩具', cost: 8, value: 14, pack: 3 },
+  { id: 'wh-shrimp', footprint: { w: 1, h: 1 }, name: '香脆虾条', emoji: '🦐', cat: '食品', cost: 2, value: 4, pack: 6, life: 10 },
+  { id: 'wh-stickers', footprint: { w: 1, h: 1 }, name: '迷你贴纸', emoji: '⭐', cat: '文具', cost: 1, value: 3, pack: 6 },
+  { id: 'wh-stamp', footprint: { w: 1, h: 1 }, name: '小印章', emoji: '🌼', cat: '文具', cost: 2, value: 4, pack: 5 },
+];
+const SHOP_SIGN = { defaultName: '校门口小卖部', maxLength: 16 };
+const DELIVERY = { packTurns: 2, pickupTurns: 1, fee: 5, repProgress: 3, count: 2 };
+const NEW_REGULAR_ROLES = {
+  grandma: '老街坊',
+  mathteacher: '数学老师',
+  peteacher: '体育老师',
+  musicteacher: '音乐老师',
+  boyglasses: '戴眼镜的男学生',
+  girlglasses: '戴眼镜的女学生',
+  cafeteria: '食堂阿姨',
+  guard: '学校保安',
+  xiaoman: '踢毽子的小学生', spike: '乐队少年', sunny: '海报设计爱好者',
+  suit: '夜校学生', cosboy: '漫画社成员', cosgirl: '手作爱好者',
+  delivery: '送餐骑手', driver: '出租车司机', teacher: '文具互助盒发起人',
+};
+const STORY_ITEMS = {
+  laozhou: ['youpiao'], guifen: ['shouyinji'], xiaodoubao: ['wh-shuttle'], qiangzi: ['shanzhaibiao'], sundaye: ['lianhuanhua'],
+  xiaoman: ['wh-shuttle'], spike: ['kouqin'], sunny: ['wh-watercolor'], suit: ['wh-pencil', 'wh-plasticbook'],
+  cosboy: ['wh-watercolor'], cosgirl: ['wh-clip'], delivery: ['wh-pear'], driver: ['wh-battery'], teacher: ['wh-eraser', 'wh-pencil'],
+};
+const EXTRA_GOOD_PREFERENCES = {
+  xiaoman: ['wh-doll', 'wh-stickers', 'wh-shrimp'],
+  xiaodoubao: ['wh-duel', 'wh-robot', 'wh-shrimp'],
+  cosboy: ['wh-duel', 'wh-robot'],
+  cosgirl: ['wh-doll', 'wh-stamp', 'wh-stickers'],
+  teacher: ['wh-stamp'],
+};
+const SHELF_GRID = { columns: 12, rows: 6, stackMaxCells: 2 };
+const NEW_CUSTOMERS = [
+  { id: 'grandma', name: '冯奶奶', profile: 'elder', likes: ['wh-balm', 'wh-cologne', 'wh-candy'] },
+  { id: 'mathteacher', name: '沈老师', profile: 'adult', likes: ['wh-compass', 'wh-ink', 'wh-pencil'] },
+  { id: 'peteacher', name: '梁老师', profile: 'adult', likes: ['wh-pear', 'wh-beanbag', 'wh-shuttle'] },
+  { id: 'musicteacher', name: '闻老师', profile: 'adult', likes: ['kouqin', 'wh-plasticbook', 'wh-battery'] },
+  { id: 'boyglasses', name: '程小远', profile: 'student', likes: ['wh-pencil', 'wh-case', 'wh-duel'] },
+  { id: 'girlglasses', name: '叶小禾', profile: 'student', likes: ['wh-watercolor', 'wh-stickers', 'wh-eraser'] },
+  { id: 'cafeteria', name: '罗姨', profile: 'auntie', likes: ['wh-balm', 'wh-pear', 'wh-plasticbook'] },
+  { id: 'guard', name: '高师傅', profile: 'elder', likes: ['wh-battery', 'wh-balm', 'wh-noodles'] },
+  { id: 'xiaoman', name: '小满', profile: 'child', likes: ['wh-clip', 'wh-shuttle', 'wh-candy', 'wh-eraser'], story: ['我们班要练踢毽子，可我一下也接不到。', '小豆包教我先把毽子抛直，我已经能踢三下了。', '今天我踢了十下！放学后我要教小豆包。'] },
+  { id: 'spike', name: '阿哲', profile: 'student', likes: ['wh-latiao', 'wh-pear', 'wh-laser'], story: ['我们想组个乐队，还缺个排练的地方。', '小晴说她家车库能借一下午，我们先试一首。', '排练完邻居没投诉，还问我们什么时候演出。'] },
+  { id: 'sunny', name: '小晴', profile: 'student', likes: ['wh-clip', 'wh-choco', 'wh-latiao'], story: ['我在做一张乐队招新海报，还没想好配色。', '海报贴出去，有个隔壁班的同学想来试键盘。', '键盘手留下来了，她还帮我们重画了一张海报。'] },
+  { id: 'suit', name: '周先生', profile: 'adult', likes: ['wh-pencil', 'wh-plasticbook', 'wh-battery'], story: ['我报名了夜校，第一次下班后还要回教室。', '上节课随堂测验没写完，今晚想早点去复习。', '这次考过了，我打算接着读下一期。'] },
+  { id: 'cosboy', name: '阿原', profile: 'student', likes: ['wh-watercolor', 'wh-laser', 'wh-choco'], story: ['我想画个自己设计的角色，服装还没上色。', '配色试了三次，总算找到了想要的颜色。', '我把设定画成一页漫画，社团愿意刊登。'] },
+  { id: 'cosgirl', name: '绵绵', profile: 'student', likes: ['wh-ink', 'wh-watercolor', 'wh-clip'], story: ['我想做一对发饰，在社团展示时戴。', '第一次做歪了，我把纸样拆了重新裁。', '展示那天有人问我怎么做，我准备教她。'] },
+  { id: 'help', name: '求助的街坊', profile: 'elder', event: 'help' },
+  { id: 'thief', name: '灰夹克顾客', profile: 'adult', event: 'theft', likes: ['wh-candy', 'wh-battery'] },
+  { id: 'delivery', name: '送餐的小陈', profile: 'adult', likes: ['wh-pear', 'wh-latiao', 'wh-balm'], story: ['我刚跑这片，不知道校门口几点会堵。', '听了你的提醒，我改走后街，今天赶上了取餐。', '现在这片路我熟了。下雨的话，你要捎什么就跟我说。'] },
+  { id: 'driver', name: '出租车司机何叔', profile: 'adult', likes: ['wh-pear', 'wh-battery', 'wh-balm', 'wh-cologne'], story: ['有乘客把一把旧伞落车上了，我先替他收着。', '调度站说有人找伞，我让他下班后到站里取。', '伞还回去了。他说那是孩子送的，难怪这么着急。'] },
+  { id: 'teacher', name: '许老师', profile: 'adult', likes: ['wh-ink', 'wh-case', 'wh-compass', 'wh-watercolor', 'wh-pencil', 'wh-eraser', 'wh-plasticbook', 'wh-beanbag'], story: ['班里想办一个文具互助盒，我先来看看缺什么。', '孩子们捐了不少铅笔，现在就缺几块橡皮。', '互助盒摆好了，忘带文具的孩子也能安心上课。'] },
+];
+const CUSTOMER_RULES = { storyVisits: [1, 3, 5], newChance: .33, helpRepChance: .5, helpRepProgress: 3, theftChance: .45 };
+const CUSTOMER_PORTRAITS = ['xiaoman', 'spike', 'sunny', 'suit', null, 'cosboy', 'cosgirl', 'help', 'thief', 'delivery', 'driver', 'teacher'];
+const SCHOOL_PORTRAITS = ['grandma', 'mathteacher', 'peteacher', 'musicteacher', 'boyglasses', 'girlglasses', 'cafeteria', 'guard'];
+const REGULAR_STORIES = {
+  laozhou: ['我在找一枚旧邮戳，想补齐当年寄给儿子的信封。', '儿子寄回来一叠信，我才发现他一封也没扔。', '缺的邮戳找到了，我打算把这些信装成一本。'],
+  guifen: ['我想把家里的旧收音机拾掇出来，早市摆摊时听。', '修好以后能收到戏曲台了，隔壁摊也凑过来听。', '今天她们轮流点戏，我这摊倒成了早市的听戏角。'],
+  xiaodoubao: ['小满想学踢毽子，我也只会两下。', '我教她先抛直，她已经追上我了。', '现在她踢得比我多。明天换她教我。'],
+  qiangzi: ['我以前只想着赶紧转手，结果有一批表坏在手里。', '我开始挨个验表了，宁可少进几件。', '今天有人回来找我配表带，说上次买的还走得准。'],
+  sundaye: ['我想找回一本小时候读过的连环画。', '找着一本同系列的，封底还有原主人写的名字。', '我孙女也爱看，我打算把这几本留给她。'],
+};
+
 const WHOLESALE = [
-  { id: 'wh-noodles', name: '干脆面', emoji: '🍜', cost: 2, value: 4, pack: 6 },
-  { id: 'wh-soda', name: '橘子汽水', emoji: '🥤', cost: 3, value: 5, pack: 6 },
-  { id: 'wh-notebook', name: '田字格本', emoji: '📒', cost: 4, value: 7, pack: 4 },
-  { id: 'danzhu', name: '玻璃弹珠', cost: 3, value: 6, pack: 4, unlock: 'clearance' },
-  { id: 'kouqin', name: '口琴', cost: 11, value: 19, pack: 2, unlock: 'receiving' },
+  { id: 'wh-noodles', footprint: { w: 1, h: 1 }, name: '干脆面', emoji: '🍜', cost: 2, value: 4, pack: 6 },
+  { id: 'wh-soda', footprint: { w: 1, h: 2 }, name: '橘子汽水', emoji: '🥤', cost: 3, value: 5, pack: 6 },
+  { id: 'wh-notebook', footprint: { w: 1, h: 1 }, name: '田字格本', emoji: '📒', cost: 4, value: 7, pack: 4 },
+  { id: 'danzhu', footprint: { w: 1, h: 1 }, name: '玻璃弹珠', cost: 3, value: 6, pack: 4, unlock: 'clearance' },
+  { id: 'kouqin', footprint: { w: 1, h: 2 }, name: '口琴', cost: 11, value: 19, pack: 2, unlock: 'receiving' },
+  ...NEW_GOODS.map(item => ({ ...item, unlock: 'clearance' })),
+  ...EXTRA_GOODS.map(item => ({ ...item, unlock: 'clearance' })),
 ];
 
 // 按天轮换进价与缺货。同一天刷新或回档时供货条件一致。
@@ -523,7 +613,7 @@ const CONDITION = {
   expired: { name: '过期', color: 'green', factor: .5 },
   spoiled: { name: '坏了', color: 'white', factor: .25 },
 };
-const FOOD_LIFE = { 'wh-noodles': 5, 'wh-soda': 7 };
+const FOOD_LIFE = { ...Object.fromEntries([...NEW_GOODS, ...EXTRA_GOODS].filter(item => item.life).map(item => [item.id, item.life])), 'wh-noodles': 5, 'wh-soda': 7 };
 // 完成的付现柜台小票数与已经收摊的天数，两个条件都要达到。
 const MILESTONES = {
   organizer: [2, 1],
@@ -534,17 +624,22 @@ const MILESTONES = {
   sticker: [28, 10],
   premium: [36, 13],
   grill: [44, 15],
+  delivery: [50, 17],
 };
 const SERVICE_NAMES = {
+  delivery: '外卖',
   organizer: '街坊宣传', clearance: '临期促销', poke: '戳戳乐', receiving: '收货鉴定',
   ledger: '熟客赊账', sticker: '集贴纸', premium: '高价货交易', grill: '烤肠机',
 };
 const TUTORIALS = [
+  { id: 'delivery', unlock: 'delivery', title: '接外卖订单', text: '点右上角「外卖」接单。两个顾客回合内配好货，随后等骑手来取，交单后获得货款、服务费与口碑进度。' },
+  { id: 'customers', unlock: 'organizer', title: '顾客图鉴', tab: 'customers', action: '看图鉴', text: '在顾客图鉴里查看来店次数和已听过的故事。部分顾客在第 1、3、5 次来店时会讲到后续。' },
+  { id: 'new-goods', unlock: 'clearance', title: '供货商新一批货', tab: 'wholesale', action: '看新货', text: '辣条、汽水、文具和玩具等新货已上架。不同顾客会优先挑自己喜欢的商品。' },
   { id: 'opening', title: '第一次开店', tab: 'wholesale', action: '去备货', text: '先向供货商订一批干脆面或汽水，再点「开店」。顾客会自动走到柜台并开口，按要求拿货、确认小票。接待完就可以收摊。' },
   { id: 'organizer', unlock: 'organizer', title: '请小梁帮忙宣传', text: '点右上角「社区小梁」，付费后当天多来两位买家。每天可宣传一次。' },
   { id: 'marbles', unlock: 'clearance', title: '供货商上新 · 玻璃弹珠', tab: 'wholesale', action: '看新货', text: '供货商现在能订玻璃弹珠。点商品下方的进货按钮订一批，之后可在柜台卖出。' },
   { id: 'clearance', unlock: 'clearance', title: '处理临期食品', text: '有临期库存时，接待页面会出现促销区。点商品加到小票，默认是货架标价的七五折。顾客点名时仍要按要求拿货。' },
-  { id: 'poke', unlock: 'poke', title: '挂上戳戳乐', tab: 'poke', action: '看洞洞板', text: '点柜台右侧的戳戳乐，选一个大奖并挂上新板。顾客会自己选洞，打开板面可看结果，收入在收摊时入账。' },
+  { id: 'poke', unlock: 'poke', title: '挂上戳戳乐', tab: 'poke', action: '看洞洞板', text: '点柜台右侧的戳戳乐，选一个大奖并挂上新板。熟客有时会在结账后问能否戳一个洞。答应后由顾客选洞，收入在收摊时入账。' },
   { id: 'harmonica', unlock: 'receiving', title: '供货商上新 · 口琴', tab: 'wholesale', action: '看新货', text: '供货商现在能按批订口琴。进货前可比较今日进价与参考售价。' },
   { id: 'receiving', unlock: 'receiving', title: '收旧货前先验货', text: '从下次开店起会遇到卖家。点击物品上的标记查线索，每件最多查三处。验完按自己的判断报价，起价被拒后还有一次机会。' },
   { id: 'ledger', unlock: 'ledger', title: '给熟客记赊账', tab: 'ledger', action: '看赊账本', text: '提出赊账的熟客会在小票上出现「记赊账」。同意后可到赊账本看欠款和到期日，到期结果在收摊时结算。' },
@@ -554,6 +649,7 @@ const TUTORIALS = [
 ];
 // target 是要点击的操作，via 用于入口尚未展开时。
 const TUTORIAL_ARROWS = {
+  delivery: { target: '#open-delivery', hint: '查看外卖订单' },
   organizer: { target: '#shop-organizer', hint: '点小梁了解宣传' },
   marbles: { target: '[data-order="danzhu"]:enabled', via: '#open-wholesale', hint: '看看新到的玻璃弹珠' },
   clearance: { target: '[data-guide="clearance"] button', hint: '看看临期促销商品' },
@@ -572,6 +668,7 @@ const NEIGHBORS = {
 const GRILL = {
   cost: 180,
   capacity: 4,
+  trayCapacity: 6,
   extraStudents: 2,
   studentNames: ['背书包的学生', '放学的学生'],
   stages: [
@@ -582,7 +679,7 @@ const GRILL = {
     { key: 'burnt', name: '烤糊', turns: 5, factor: 0 },
   ],
   foods: [
-    { id: 'grill-sausage', name: '烤肠', emoji: '🌭', cat: '热食', cost: 2, pack: 8, value: 6 },
-    { id: 'grill-ball', name: '丸子串', emoji: '🍡', cat: '热食', cost: 3, pack: 6, value: 8 },
+    { id: 'grill-sausage', footprint: { w: 1, h: 1 }, name: '烤肠', emoji: '🌭', cat: '热食', cost: 2, pack: 8, value: 6 },
+    { id: 'grill-ball', footprint: { w: 1, h: 1 }, name: '丸子串', emoji: '🍡', cat: '热食', cost: 3, pack: 6, value: 8 },
   ],
 };

@@ -44,7 +44,7 @@
 
   <!-- 顶部资源栏：天数 / 资金 / 口碑 / 目标进度 -->
   <header id="topbar">
-    <div class="brand">校门口小卖部</div>
+    <div class="brand" id="shop-sign">校门口小卖部</div>
     <div class="stats">
       <span class="stat" id="stat-day">第 1 天</span>
       <span class="stat money" id="stat-money">💰 ¥250</span>
@@ -89,6 +89,8 @@
         </button>
         <div id="trade-dialogue" class="trade-dialogue hidden" aria-live="polite"></div>
         <div class="neighbor-dock">
+          <button id="open-delivery" class="shop-npc hidden" type="button" aria-haspopup="dialog">外卖</button>
+          <button id="open-live" class="shop-npc" type="button" aria-haspopup="dialog">直播</button>
           <button id="shop-npc" type="button" class="shop-npc" data-npc="mentor" aria-controls="neighborhood" aria-expanded="false">
             <span class="neighbor-avatar" aria-hidden="true"></span><strong>邻居林姨</strong>
           </button>
@@ -126,6 +128,7 @@
           </div>
           <div class="counter-zone supply-zone">
             <button id="open-wholesale" type="button" class="btn small gold">进货</button>
+            <button id="open-shelf-grid" type="button" class="btn small">上架</button>
           </div>
         </section>
       </div>
@@ -148,6 +151,7 @@
         <button data-tab="grill" class="tab">烤肠机</button>
         <button data-tab="collection" class="tab">图鉴</button>
         <button data-tab="regulars" class="tab">熟客</button>
+        <button data-tab="customers" class="tab">顾客图鉴</button>
       </nav>
       <div id="tab-pages"><!-- game.js 渲染各页签 --></div>
     </details>
@@ -161,6 +165,18 @@
       <button id="confirm-display" type="submit" class="btn gold">摆放</button>
       <button type="submit" class="btn" value="cancel">取消</button>
     </form>
+  </dialog>
+  <dialog id="shop-name-dialog" class="shop-service-dialog" aria-labelledby="shop-name-title">
+    <form>
+      <h2 id="shop-name-title">给小卖部起个名字</h2>
+      <label for="shop-name">招牌名称</label>
+      <input id="shop-name" type="text" required>
+      <button class="btn gold">挂上招牌</button>
+    </form>
+  </dialog>
+  <dialog id="shop-service" class="shop-service-dialog" aria-labelledby="shop-service-title">
+    <div id="shop-service-content"></div>
+    <form method="dialog"><button class="btn small">返回柜台</button></form>
   </dialog>
   <dialog id="item-viewer" aria-labelledby="item-viewer-name">
     <header class="item-viewer-header">
@@ -200,7 +216,7 @@
         <button type="button" class="btn" onclick="devGrantResources()">补齐资金与商品</button>
         <button type="button" class="btn" onclick="devMeetVisitor('buyer')">立即测试买家</button>
         <button type="button" class="btn" onclick="devMeetVisitor('buyer','child')">测试小学生</button>
-        <button type="button" class="btn" onclick="devMeetVisitor('buyer','auntie')">测试大婶议价</button>
+        <button type="button" class="btn" onclick="devMeetVisitor('buyer','auntie')">测试街坊阿姨议价</button>
         <button type="button" class="btn" onclick="devMeetVisitor('buyer','youngMan')">测试青年男生</button>
         <button type="button" class="btn" onclick="devMeetVisitor('seller')">立即测试卖家</button>
         <button type="button" class="btn" onclick="devMeetVisitor('credit')">立即测试赊账</button>
@@ -219,6 +235,7 @@
     <section class="dev-section">
       <h3>烤肠机火候</h3>
       <div id="dev-grill-stages" class="dev-grid"></div>
+      <div id="dev-encounters" class="dev-grid"></div>
     </section>
   </dialog>
 
