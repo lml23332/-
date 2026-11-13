@@ -107,6 +107,20 @@ const SHOP_CATEGORIES = [
   { id: 'collect', name: '收藏旧物', cats: ['收藏'] },
 ];
 
+// 以开店第一天为周一，每 28 天重复一次。事件按周期内的日期安排。
+const SHOP_CALENDAR = {
+  cycleDays: 28,
+  weekdays: ['一', '二', '三', '四', '五', '六', '日'],
+  events: [
+    { day: 3, name: '雨天', description: '放学后大家赶着回家，零食饮料也好商量。', buyers: -1, prices: { food: .90 } },
+    { day: 5, name: '运动会', description: '操场活动结束，孩子们来补充零食和饮料。', buyers: 2, prices: { food: 1.20 } },
+    { day: 9, name: '手工课', description: '手工课要用到文具，校门口比平常热闹。', buyers: 1, prices: { study: 1.15 } },
+    { day: 14, name: '学校放假', description: '学生少了，文具和玩具更容易议价。', buyers: -2, prices: { study: .85, fun: .90 } },
+    { day: 19, name: '街坊市集', description: '周边摊位陆续开张，日用品和旧物更受关注。', buyers: 2, prices: { daily: 1.15, collect: 1.10 } },
+    { day: 24, name: '放学联欢', description: '同学们结伴来买零食和小玩具。', buyers: 2, prices: { food: 1.10, fun: 1.15 } },
+  ],
+};
+
 /* 买家画像：预算倍率、主动讨价概率、最多报价回合、期望折扣区间。 */
 const BUYER_PROFILES = {
   child:    { name: '小学生', budgetMult: .68, haggleChance: .08, rounds: [1, 1], target: [.94, .98] },
@@ -463,13 +477,14 @@ const EXTRA_GOODS = [
   { id: 'wh-duel', footprint: { w: 1, h: 1 }, name: '对战卡片包', emoji: '🃏', cat: '卡牌', cost: 3, value: 6, pack: 4 },
   { id: 'wh-robot', footprint: { w: 2, h: 3 }, name: '变形机器人', emoji: '🤖', cat: '玩具', cost: 9, value: 15, pack: 3 },
   { id: 'wh-doll', footprint: { w: 2, h: 3 }, name: '换装娃娃', emoji: '🎀', cat: '玩具', cost: 8, value: 14, pack: 3 },
-  { id: 'wh-shrimp', footprint: { w: 1, h: 1 }, name: '香脆虾条', emoji: '🦐', cat: '食品', cost: 2, value: 4, pack: 6, life: 10 },
+  { id: 'wh-shrimp', footprint: { w: 1, h: 1 }, name: '咪米虾条', emoji: '🦐', cat: '食品', cost: 2, value: 4, pack: 6, life: 10 },
   { id: 'wh-stickers', footprint: { w: 1, h: 1 }, name: '迷你贴纸', emoji: '⭐', cat: '文具', cost: 1, value: 3, pack: 6 },
   { id: 'wh-stamp', footprint: { w: 1, h: 1 }, name: '小印章', emoji: '🌼', cat: '文具', cost: 2, value: 4, pack: 5 },
 ];
 const SHOP_SIGN = { defaultName: '校门口小卖部', maxLength: 16 };
 const DELIVERY = { packTurns: 2, pickupTurns: 1, fee: 5, repProgress: 3, count: 2 };
 const NEW_REGULAR_ROLES = {
+  foodblogger: '美食博主', shopblogger: '探店博主', university: '大学生', infirmary: '医务室老师',
   grandma: '老街坊',
   mathteacher: '数学老师',
   peteacher: '体育老师',
@@ -496,6 +511,10 @@ const EXTRA_GOOD_PREFERENCES = {
 };
 const SHELF_GRID = { columns: 12, rows: 6, stackMaxCells: 2 };
 const NEW_CUSTOMERS = [
+  { id: 'foodblogger', name: '阿葵', profile: 'adult', likes: ['wh-shrimp', 'wh-latiao', 'grill-sausage', 'grill-ball'] },
+  { id: 'shopblogger', name: '陶野', profile: 'adult', likes: ['wh-pear', 'wh-robot', 'wh-duel', 'wh-choco'] },
+  { id: 'university', name: '顾辰', profile: 'student', likes: ['wh-pencil', 'wh-plasticbook', 'wh-latiao'] },
+  { id: 'infirmary', name: '温老师', profile: 'adult', likes: ['wh-balm', 'wh-cologne', 'wh-battery'] },
   { id: 'grandma', name: '冯奶奶', profile: 'elder', likes: ['wh-balm', 'wh-cologne', 'wh-candy'] },
   { id: 'mathteacher', name: '沈老师', profile: 'adult', likes: ['wh-compass', 'wh-ink', 'wh-pencil'] },
   { id: 'peteacher', name: '梁老师', profile: 'adult', likes: ['wh-pear', 'wh-beanbag', 'wh-shuttle'] },
@@ -519,6 +538,7 @@ const NEW_CUSTOMERS = [
 const CUSTOMER_RULES = { storyVisits: [1, 3, 5], newChance: .33, helpRepChance: .5, helpRepProgress: 3, theftChance: .45 };
 const CUSTOMER_PORTRAITS = ['xiaoman', 'spike', 'sunny', 'suit', null, 'cosboy', 'cosgirl', 'help', 'thief', 'delivery', 'driver', 'teacher'];
 const SCHOOL_PORTRAITS = ['grandma', 'mathteacher', 'peteacher', 'musicteacher', 'boyglasses', 'girlglasses', 'cafeteria', 'guard'];
+const CALENDAR_PORTRAITS = ['foodblogger', 'shopblogger', 'university', 'infirmary'];
 const REGULAR_STORIES = {
   laozhou: ['我在找一枚旧邮戳，想补齐当年寄给儿子的信封。', '儿子寄回来一叠信，我才发现他一封也没扔。', '缺的邮戳找到了，我打算把这些信装成一本。'],
   guifen: ['我想把家里的旧收音机拾掇出来，早市摆摊时听。', '修好以后能收到戏曲台了，隔壁摊也凑过来听。', '今天她们轮流点戏，我这摊倒成了早市的听戏角。'],

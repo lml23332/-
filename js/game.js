@@ -260,9 +260,47 @@ function stockValue(stock) {
 
 function retailPrice(stock) {
   const base = stock.relabelled && stock.variant === 'fake' ? Math.round(stock.value / CONFIG.variantMult.fake) : stockValue(stock);
-  return Math.max(1, Math.round(base * STRATEGIES[state.strategy].mult));
+  return Math.max(1, Math.round(base * STRATEGIES[state.strategy].mult * calendarPrice(itemById(stock.itemId))));
 }
 
+function calendarDay(day) {
+  return (day - 1) % SHOP_CALENDAR.cycleDays + 1;
+}
+
+function calendarEvent(day = state.day) {
+  return SHOP_CALENDAR.events.find(event => event.day === calendarDay(day));
+}
+
+function calendarPrice(item) {
+  return calendarEvent()?.prices[shopCategory(item).id] ?? 1;
+}
+
+function openCalendar() {
+  const { cycleDays, weekdays } = SHOP_CALENDAR;
+  const today = calendarDay(state.day);
+  const cycle = Math.floor((state.day - 1) / cycleDays) + 1;
+  const start = state.day - today + 1;
+  const cells = Array.from({ length: cycleDays }, (_, index) => {
+    const day = index + 1;
+    const event = calendarEvent(start + index);
+    return `<li ${day === today ? 'aria-current="date"' : ''} class="${event ? 'calendar-event' : ''}">
+      <b>${day}</b>${event ? '<small>' + event.name + '</small>' : ''}</li>`;
+  }).join('');
+  const events = SHOP_CALENDAR.events.map(event => {
+    const changes = Object.entries(event.prices).map(([id, multiplier]) => {
+      const category = SHOP_CATEGORIES.find(entry => entry.id === id);
+      const percent = Math.round((multiplier - 1) * 100);
+      return category.name + ' ' + (percent > 0 ? '+' : '') + percent + '%';
+    });
+    const traffic = event.buyers ? '买家 ' + (event.buyers > 0 ? '+' : '') + event.buyers + ' 位' : '';
+    return `<li><strong>${event.day} 日 · ${event.name}</strong><small>${[traffic, ...changes].filter(Boolean).join(' · ')}</small>
+      <p>${event.description}</p></li>`;
+  }).join('');
+  $('#calendar-content').innerHTML = `<p>第 ${cycle} 期 · 今天是 ${today} 日</p>
+    <div class="calendar-week" aria-hidden="true">${weekdays.map(day => '<span>' + day + '</span>').join('')}</div>
+    <ol class="calendar-grid">${cells}</ol><ul class="calendar-events">${events}</ul>`;
+  $('#calendar-dialog').showModal();
+}
 function changeLabel(uid) {
   const stock = state.shelf.find(entry => entry.uid === uid && entry.variant === 'fake');
   if (!stock || state.settlement) return;
@@ -562,7 +600,8 @@ function fillSelfPickedReceipt(guest, stock) {
 }
 
 function enqueueBuyers() {
-  const count = clamp(CONFIG.buyersGuaranteed + STRATEGIES[state.strategy].buyers + neighborTraffic(), ...CONFIG.retail.buyerCount);
+  const adjustment = calendarEvent()?.buyers ?? 0;
+  const count = clamp(CONFIG.buyersGuaranteed + STRATEGIES[state.strategy].buyers + neighborTraffic() + adjustment, ...CONFIG.retail.buyerCount);
   for (let i = 0; i < count; i++) state.queue.push({ type: 'buyer' });
 }
 
@@ -833,7 +872,7 @@ function retailAvailable(stock) {
 }
 
 function counterPrice(stock) {
-  if (stock.grilled) return Math.max(1, Math.round(stock.value * grillStage(stock).factor));
+  if (stock.grilled) return Math.max(1, Math.round(stock.value * grillStage(stock).factor * calendarPrice(itemById(stock.itemId))));
   const price = retailPrice(stock);
   return serviceAvailable('clearance') && stockCondition(stock) === 'near'
     ? Math.max(1, Math.round(price * CONFIG.retail.clearanceMultiplier)) : price;
@@ -1453,7 +1492,7 @@ function endDay() {
   const remain = [];
   for (const s of state.shelf) {
     if (!state.devForceEvent && retailAvailable(s) && Math.random() < strat.autoRate) {
-      const price = Math.max(1, Math.round(stockValue(s) * strat.autoMult));
+      const price = Math.max(1, Math.round(stockValue(s) * strat.autoMult * calendarPrice(itemById(s.itemId))));
       state.money += price;
       autoList.push({ itemId: s.itemId, label: `自动售出 ${itemById(s.itemId).name}`, revenue: price, profit: price - s.cost });
       if (buyerObjection({ age: 'adult' }, s)) complaintCount++;
@@ -1729,6 +1768,8 @@ function enterShop(showGuide) {
 }
 
 function itemArtwork(id) {
+  const shelfExtra = EXTRA_GOODS.findIndex(item => item.id === id);
+  if (shelfExtra >= 0) return `<span class="item-art item-extra" style="--item-x:${shelfExtra % 3 * 50}%;--item-y:${Math.floor(shelfExtra / 3) * 100}%" aria-hidden="true"></span>`;
   const extra = NEW_GOODS.findIndex(item => item.id === id);
   if (extra >= 0) return `<span class="item-art item-new" style="--item-x:${extra % 6 * 20}%;--item-y:${Math.floor(extra / 6) * 50}%" aria-hidden="true"></span>`;
   const art = ITEM_ART[id];
@@ -1875,6 +1916,8 @@ function placeDisplayProduct() {
 function renderTop() {
   $('#shop-sign').textContent = state.shopName || SHOP_SIGN.defaultName;
   $('#stat-day').textContent = `第 ${state.day} 天`;
+  const event = calendarEvent();
+  $('#open-calendar').textContent = event ? '日历 · ' + event.name : '日历';
   $('#stat-money').textContent = `💰 ¥${state.money}`;
   $('#stat-rep').textContent = `口碑 ${state.rep}`;
   $('#stat-rep').title = '口碑进度 ' + state.repVisits + ' / ' + CONFIG.reputation.visitsPerPoint;
@@ -1899,6 +1942,8 @@ function renderVisitor() {
 
 function customerPortrait(guest) {
   const identity = guest.portraitName || guest.name;
+  const calendarIndex = CALENDAR_PORTRAITS.indexOf(guest.customerId || guest.id);
+  if (calendarIndex >= 0) return { key: 'calendar', position: (calendarIndex % 2 * 100) + '% ' + (Math.floor(calendarIndex / 2) * 100) + '%' };
   const schoolIndex = SCHOOL_PORTRAITS.indexOf(guest.customerId || guest.id);
   if (schoolIndex >= 0) return { key: 'school', position: (schoolIndex % 4 * 100 / 3) + '% ' + (schoolIndex < 4 ? '0%' : '100%') };
   const index = guest.customerId ? CUSTOMER_PORTRAITS.indexOf(guest.customerId) : -1;
@@ -2171,7 +2216,7 @@ function tabWholesale() {
     const disabled = state.settlement || soldOut || state.wholesaleOrders.includes(product.id);
     return `<div class="card">
       <div class="row"><span>${itemPreviewButton(product.id, true)} <b>${product.name}</b></span><span>每批 ${product.pack} 件</span></div>
-      <div class="mut">进价 ¥${cost} / 件 · 参考零售价 ¥${product.value} / 件${change}</div>
+      <div class="mut">进价 ¥${cost} / 件 · 今日参考零售价 ¥${Math.max(1, Math.round(product.value * calendarPrice(product)))} / 件${change}</div>
       <button class="btn small gold display-toggle" data-order="${product.id}" onclick="orderWholesale('${product.id}')" ${disabled ? 'disabled' : ''}>${label}</button>
     </div>`;
   }).join('');
@@ -2808,6 +2853,7 @@ $('#open-live').addEventListener('click', () => {
   $('#shop-service').showModal();
 });
 $('#open-title').addEventListener('click', openTitle);
+$('#open-calendar').addEventListener('click', openCalendar);
 $('#start-game').addEventListener('click', () => enterShop(false));
 $('#guide-start').addEventListener('click', () => enterShop(true));
 $('#hide-guide').addEventListener('click', () => {
