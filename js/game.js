@@ -1768,6 +1768,8 @@ function enterShop(showGuide) {
 }
 
 function itemArtwork(id) {
+  const shelfExtra = EXTRA_GOODS.findIndex(item => item.id === id);
+  if (shelfExtra >= 0) return `<span class="item-art item-extra" style="--item-x:${shelfExtra % 3 * 50}%;--item-y:${Math.floor(shelfExtra / 3) * 100}%" aria-hidden="true"></span>`;
   const extra = NEW_GOODS.findIndex(item => item.id === id);
   if (extra >= 0) return `<span class="item-art item-new" style="--item-x:${extra % 6 * 20}%;--item-y:${Math.floor(extra / 6) * 50}%" aria-hidden="true"></span>`;
   const art = ITEM_ART[id];

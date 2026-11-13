@@ -477,7 +477,7 @@ const EXTRA_GOODS = [
   { id: 'wh-duel', footprint: { w: 1, h: 1 }, name: '对战卡片包', emoji: '🃏', cat: '卡牌', cost: 3, value: 6, pack: 4 },
   { id: 'wh-robot', footprint: { w: 2, h: 3 }, name: '变形机器人', emoji: '🤖', cat: '玩具', cost: 9, value: 15, pack: 3 },
   { id: 'wh-doll', footprint: { w: 2, h: 3 }, name: '换装娃娃', emoji: '🎀', cat: '玩具', cost: 8, value: 14, pack: 3 },
-  { id: 'wh-shrimp', footprint: { w: 1, h: 1 }, name: '香脆虾条', emoji: '🦐', cat: '食品', cost: 2, value: 4, pack: 6, life: 10 },
+  { id: 'wh-shrimp', footprint: { w: 1, h: 1 }, name: '咪米虾条', emoji: '🦐', cat: '食品', cost: 2, value: 4, pack: 6, life: 10 },
   { id: 'wh-stickers', footprint: { w: 1, h: 1 }, name: '迷你贴纸', emoji: '⭐', cat: '文具', cost: 1, value: 3, pack: 6 },
   { id: 'wh-stamp', footprint: { w: 1, h: 1 }, name: '小印章', emoji: '🌼', cat: '文具', cost: 2, value: 4, pack: 5 },
 ];

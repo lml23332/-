@@ -750,6 +750,11 @@ main { grid-template-columns: minmax(0, 1fr); }
   background-size: 600% 300%;
   filter: none;
 }
+.item-art.item-extra {
+  background-image: url("../assets/items-extras.png");
+  background-size: 300% 200%;
+  filter: none;
+}
 .portrait-frame[data-portrait="new"] {
   width: clamp(100px, 28cqw, 290px);
   aspect-ratio: 1;
