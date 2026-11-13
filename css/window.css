@@ -745,6 +745,139 @@ main { grid-template-columns: minmax(0, 1fr); }
 .art-filters { position: absolute; pointer-events: none; }
 .item-art { filter: url("#item-key"); }
 .item-art-handheld { filter: url("#handheld-key"); }
+.item-art.item-new {
+  background-image: url("../assets/items-neighborhood.png");
+  background-size: 600% 300%;
+  filter: none;
+}
+.portrait-frame[data-portrait="new"] {
+  width: clamp(100px, 28cqw, 290px);
+  aspect-ratio: 1;
+  background-image: url("../assets/customer-portraits-neighborhood.png");
+  background-size: 400% 300%;
+}
+.customer-roster {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
+  align-items: start;
+  gap: 10px;
+  margin-top: 10px;
+}
+.portrait-frame[data-portrait="school"] {
+  width: clamp(100px, 28cqw, 290px);
+  aspect-ratio: 1;
+  background-image: url("../assets/customer-portraits-school.png");
+  background-size: 400% 200%;
+}
+.regular-card {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.regular-card .customer-card-art { height: 64px; margin: 0; }
+.regular-card .row { flex-wrap: wrap; gap: 3px 10px; }
+.customer-card { margin: 0; min-width: 0; }
+.customer-card-art {
+  display: grid;
+  place-items: center;
+  height: 112px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: linear-gradient(#435044, #26362e);
+  margin-bottom: 6px;
+}
+.customer-card-art .portrait-frame {
+  width: auto;
+  height: 100%;
+  max-width: 100%;
+}
+.customer-card-art .portrait-frame:is([data-portrait="0"], [data-portrait="1"], [data-portrait="2"], [data-portrait="3"], [data-portrait="courier"]) {
+  transform: scale(1.22);
+}
+.guest-call .portrait-frame:is([data-portrait="0"], [data-portrait="1"], [data-portrait="2"], [data-portrait="3"], [data-portrait="courier"]) {
+  width: clamp(88px, 23cqw, 218px);
+}
+
+.shelf-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.supply-zone { gap: 3px; }
+#rotate-shelf { margin-left: auto; }
+#rotate-shelf.rotate-during-drag {
+  position: fixed;
+  z-index: 46;
+  right: 12px;
+  bottom: 18px;
+  min-height: 44px;
+}
+.shelf-scroll { overflow-x: auto; margin: 8px 0; }
+#shelf-grid {
+  --cell: clamp(40px, 6vw, 64px);
+  display: grid;
+  position: relative;
+  width: max-content;
+  grid-template-columns: repeat(var(--cols), var(--cell));
+  grid-template-rows: repeat(var(--rows), var(--cell));
+  overflow: hidden;
+  background:
+    linear-gradient(to right, #ad835669 1px, transparent 1px),
+    linear-gradient(to bottom, #ad835669 1px, transparent 1px),
+    #39291f;
+  background-size: var(--cell) var(--cell);
+  box-shadow: inset -1px -1px #ad835669;
+}
+.shelf-piece {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 1px;
+  margin: 2px;
+  padding: 1px;
+  border: 1px solid #aa8050;
+  border-radius: 4px;
+  background: #62452f;
+  color: #fff0d1;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.1;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.shelf-piece .item-art { width: min(100%, 32px); }
+.shelf-piece span:not(.item-art) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shelf-piece b { position: absolute; top: 1px; right: 2px; padding: 2px; background: #342418; border-radius: 3px; }
+.shelf-piece[data-rotation="90"] .item-art { transform: rotate(90deg); }
+#shelf-pending { padding: 8px; min-height: 74px; border: 1px dashed #a88a60; border-radius: 4px; }
+.shelf-pending-items { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.shelf-pending-items .shelf-piece { min-width: 65px; min-height: 48px; }
+#shelf-pending.shelf-drop-ready { background: #3a593c; }
+.shelf-dragging { opacity: .24; }
+.shelf-ghost { position: fixed; z-index: 45; margin: 0; pointer-events: none; opacity: .68; }
+#shelf-preview { position: absolute; z-index: 2; background: #43d36c55; border: 2px solid #83ef96; pointer-events: none; }
+#shelf-preview.invalid { background: #e152525e; border-color: #fb7777; }
+#shop-sign {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 4px 10px;
+  border: 1px solid #bc945d;
+  background: #422a21;
+  color: #ffe0a6;
+}
+.shop-service-dialog {
+  width: min(92vw, 400px);
+  margin: auto;
+  padding: 16px;
+  border: 2px solid #d7ae73;
+  background: #20362b;
+  color: #fff0cf;
+}
+.shop-service-dialog::backdrop { background: #101912bb; }
+.shop-service-dialog form { display: grid; gap: 8px; }
+.shop-service-dialog p, #shop-service-content { margin-bottom: 8px; }
+#shop-name { min-height: 36px; padding: 4px 8px; font: inherit; }
+.customer-card strong, .customer-card small { display: block; }
+.customer-card ol { padding-left: 1.2em; }
 .item-preview { background: transparent; }
 
 /* 以桌板前沿为基准摆放货架、账本和进货牌。 */
