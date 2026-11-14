@@ -131,6 +131,11 @@
             <button id="open-wholesale" type="button" class="btn small gold">进货</button>
             <button id="open-shelf-grid" type="button" class="btn small">上架</button>
           </div>
+          <button id="service-bell" type="button" class="service-bell" aria-live="polite">
+            <span class="service-bell-dome" aria-hidden="true"></span>
+            <strong id="service-bell-label">开门营业</strong>
+            <small id="service-bell-hint">也可以先备货</small>
+          </button>
         </section>
       </div>
       <section id="counter" class="trade-stage hidden" aria-label="柜台交易">
@@ -153,20 +158,12 @@
         <button data-tab="collection" class="tab">图鉴</button>
         <button data-tab="regulars" class="tab">熟客</button>
         <button data-tab="customers" class="tab">顾客图鉴</button>
+        <button data-tab="feedback" class="tab">顾客意见板</button>
       </nav>
       <div id="tab-pages"><!-- game.js 渲染各页签 --></div>
     </details>
   </main>
 
-  <dialog id="display-picker" aria-labelledby="display-picker-title">
-    <form method="dialog" class="trade-actions">
-      <h2 id="display-picker-title">布置货架</h2>
-      <label for="display-product">陈列商品</label>
-      <select id="display-product"></select>
-      <button id="confirm-display" type="submit" class="btn gold">摆放</button>
-      <button type="submit" class="btn" value="cancel">取消</button>
-    </form>
-  </dialog>
   <dialog id="shop-name-dialog" class="shop-service-dialog" aria-labelledby="shop-name-title">
     <form>
       <h2 id="shop-name-title">给小卖部起个名字</h2>

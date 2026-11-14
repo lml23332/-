@@ -109,3 +109,38 @@ async function playRegisterSound() {
     });
   } catch (error) { /* 浏览器禁止音频时保持静默，不影响交易 */ }
 }
+
+async function playServiceBellSound() {
+  try {
+    if (!await ensureShopAudio()) return;
+    const now = shopAudio.currentTime;
+    // 上餐铃：一次短促机械敲击，加同一基音的金属泛音，不演奏旋律。
+    const strikeBuffer = shopAudio.createBuffer(1, Math.max(1, Math.floor(shopAudio.sampleRate * .018)), shopAudio.sampleRate);
+    const strikeData = strikeBuffer.getChannelData(0);
+    for (let index = 0; index < strikeData.length; index++) strikeData[index] = (Math.random() * 2 - 1) * (1 - index / strikeData.length);
+    const strike = shopAudio.createBufferSource();
+    const strikeFilter = shopAudio.createBiquadFilter();
+    const strikeGain = shopAudio.createGain();
+    strike.buffer = strikeBuffer;
+    strikeFilter.type = 'bandpass';
+    strikeFilter.frequency.value = 4200;
+    strikeFilter.Q.value = 1.8;
+    strikeGain.gain.setValueAtTime(.22, now);
+    strikeGain.gain.exponentialRampToValueAtTime(.0001, now + .025);
+    strike.connect(strikeFilter).connect(strikeGain).connect(effectsOutput);
+    strike.start(now);
+    strike.stop(now + .025);
+    [1860, 2670, 4190, 5830].forEach((frequency, index) => {
+      const oscillator = shopAudio.createOscillator();
+      const gain = shopAudio.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = frequency;
+      gain.gain.setValueAtTime(.0001, now);
+      gain.gain.exponentialRampToValueAtTime(.18 / (index + 1), now + .003);
+      gain.gain.exponentialRampToValueAtTime(.0001, now + .58 - index * .07);
+      oscillator.connect(gain).connect(effectsOutput);
+      oscillator.start(now);
+      oscillator.stop(now + .62);
+    });
+  } catch (error) { /* 浏览器禁止音频时保持静默，不影响叫号 */ }
+}
