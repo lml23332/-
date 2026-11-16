@@ -21,8 +21,22 @@ body {
   border-color: #56735b;
   box-shadow: 0 4px #0e1913;
 }
-.brand { font-size: clamp(17px, 2vw, 24px); }
-.stat { border-radius: 4px; border-color: #64765b; }
+.brand {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 5px 10px;
+  background: #483125;
+  border: 1px solid #b28a5d;
+  box-shadow: inset 0 0 0 2px #30261d;
+  color: #ffe0a6;
+  font-size: clamp(16px, 2vw, 22px);
+}
+#topbar .stats { align-items: center; gap: 5px; }
+#topbar .top-actions { flex-wrap: wrap; }
+#topbar .stat { padding: 4px 8px; border-radius: 4px; border-color: #496252; font-size: 13px; }
+#open-calendar { background: #304a3b; border: 1px solid #607764; min-height: 32px; }
+.stat.goal { display: grid; gap: 3px; }
+#shop-goal-progress { width: 100%; height: 5px; accent-color: #e9af61; }
 .btn { border-radius: 4px; min-height: 38px; }
 button:focus-visible, summary:focus-visible, .card:focus-visible {
   outline: 2px solid #ffdf9b;
@@ -594,6 +608,9 @@ main { grid-template-columns: minmax(0, 2.6fr) minmax(250px, 1fr); gap: 14px; al
   font-size: 10px;
   line-height: 1.2;
 }
+.categorized-name { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.categorized-name .stock-category, .buyer-options .stock-category { font-size: 11px; }
+.receipt-editor-row .stock-category { color: #654125; border-color: #a78154; }
 .stock-price { color: #ffe0a6; }
 .shelf-strategy summary { cursor: pointer; }
 .shelf-strategy .trade-actions { margin-top: 8px; }
@@ -889,14 +906,6 @@ main { grid-template-columns: minmax(0, 1fr); }
 .shelf-ghost { position: fixed; z-index: 45; margin: 0; pointer-events: none; opacity: .68; }
 #shelf-preview { position: absolute; z-index: 2; background: #43d36c55; border: 2px solid #83ef96; pointer-events: none; }
 #shelf-preview.invalid { background: #e152525e; border-color: #fb7777; }
-#shop-sign {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  padding: 4px 10px;
-  border: 1px solid #bc945d;
-  background: #422a21;
-  color: #ffe0a6;
-}
 .shop-service-dialog {
   width: min(92vw, 400px);
   margin: auto;
@@ -974,30 +983,41 @@ main { grid-template-columns: minmax(0, 1fr); }
 .delivery-complete { width: 100%; margin-top: 9px; }
 .delivery-paid { margin-top: 9px; color: #bfe3a8; font-weight: 700; }
 .courier-pickup { margin-bottom: 10px; }
-.feedback-board { display: grid; gap: 10px; }
-.feedback-board.empty { padding: 18px; border: 1px dashed #a88455; background: #1c3329; }
-.feedback-board-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.feedback-board-heading p { color: #cfb88f; }
-.feedback-board-heading > strong { padding: 5px 9px; border-radius: 999px; background: #65402d; color: #ffe1a4; white-space: nowrap; }
-.feedback-note {
-  padding: 11px;
-  border: 1px solid #9b774e;
-  border-left: 5px solid #d69d51;
-  border-radius: 5px;
-  background: #f2dfb6;
-  color: #38271d;
-  box-shadow: 2px 3px #120e0a45;
+.comment-feed {
+  max-width: 700px;
+  margin-inline: auto;
+  background: #fcf8ee;
+  color: #352b23;
+  border-radius: 12px;
+  border: 1px solid #d5bc92;
 }
-.feedback-note.good { border-left-color: #6f9b58; background: #e2e7bd; }
-.feedback-note header { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px dashed #a78359; padding-bottom: 5px; }
-.feedback-note header small { color: #765c45; }
-.feedback-note p { margin: 8px 0; line-height: 1.55; }
-.feedback-note aside { padding: 7px 9px; border-radius: 4px; background: #fff8dfb5; color: #65472f; font-size: 12px; }
-.feedback-note aside b { margin-right: 6px; color: #8b4f2f; }
-.feedback-replies { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
-.feedback-replies > span { font-size: 12px; color: #765c45; }
-.owner-reply { display: grid; gap: 3px; margin-top: 9px; padding: 7px 9px; border-left: 3px solid #6f8f59; background: #d8dfc4; }
-.owner-reply span { font-size: 12px; }
+.comment-feed > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 13px 15px; }
+.comment-feed > header h2 { margin: 0; color: inherit; font-size: 16px; }
+.comment-feed > header small, .comment-meta, .comment-author { color: #715f50; }
+.comment-reply-dot, #tabs [data-pending-replies]::before {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d8473e;
+  vertical-align: middle;
+}
+#tabs [data-pending-replies]::before { content: ""; margin-inline-end: 5px; }
+.comment-reply-dot { margin-inline-start: 5px; }
+.comment-list { max-height: min(58vh, 480px); overflow-y: auto; overscroll-behavior-y: contain; scrollbar-color: #a78359 #f1e8d8; }
+.comment-list:focus-visible { outline: 2px solid #96693c; outline-offset: -2px; }
+.feedback-comment { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; padding: 13px 15px; border-top: 1px solid #e7dac5; }
+.comment-avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--avatar-color, #e7d2ab); font-size: 18px; line-height: 1; }
+.comment-followup { display: grid; grid-template-columns: 25px minmax(0, 1fr); gap: 7px; margin-top: 9px; padding-left: 8px; border-left: 1px solid #dfd1ba; font-size: 13px; }
+.comment-followup .comment-avatar { width: 25px; height: 25px; font-size: 14px; }
+.comment-followup strong { color: #715f50; font-size: 12px; }
+.comment-content p { margin: 4px 0; line-height: 1.55; overflow-wrap: anywhere; }
+.comment-details { margin-top: 6px; color: #625344; font-size: 13px; }
+.comment-details summary { width: fit-content; padding-block: 3px; cursor: pointer; color: #76502d; font-weight: 700; }
+.comment-owner { margin: 8px 0 0; padding: 6px 10px; border-left: 2px solid #a0ad8c; background: #edf0e5; }
+.comment-owner strong, .comment-owner small { color: #3d5939; font-size: 12px; }
+.comment-empty { padding: 0 15px 15px; color: #715f50; }
+.feedback-replies { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
 #shop-name { min-height: 36px; padding: 4px 8px; font: inherit; }
 .customer-card strong, .customer-card small { display: block; }
 .customer-card ol { padding-left: 1.2em; }
@@ -1292,8 +1312,12 @@ main { grid-template-columns: minmax(0, 1fr); }
 #open-grill { grid-column: 3; }
 .book-zone { grid-column: 4; justify-self: end; }
 .supply-zone { grid-column: 5; }
+.counter-service-actions { grid-column: 6; display: flex; align-items: end; gap: 5px; }
+.counter-service-actions .close-shop { min-width: auto; }
+.close-shop > span { font-size: 22px; line-height: 1; }
+#close-shop-message { margin: 10px 0 14px; }
+.close-shop-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
 .service-bell {
-  grid-column: 6;
   display: grid;
   justify-items: center;
   align-self: end;
@@ -1588,16 +1612,19 @@ main { grid-template-columns: minmax(0, 1fr); }
   100% { background: transparent; box-shadow: 0 0 0 0 transparent; }
 }
 @media (max-width: 600px) {
+  .counter-service-actions { flex-direction: column; align-items: stretch; }
+  .counter-service-actions .service-bell { align-self: stretch; }
+  .close-shop > span { font-size: 15px; }
   .neighbor-dock { flex-direction: column; }
   #neighborhood.neighbor-talk { top: 31%; width: min(68%, 320px); gap: 5px; }
   .grill-rack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 410px) {
-  .display { inset-inline: 6%; }
-  .counter-poke, .counter-grill { width: 42px; padding: 2px; }
+  .display { inset-inline: 5%; gap: 3px; }
+  .counter-poke, .counter-grill { width: 34px; padding: 2px; }
   .counter-pegboard { padding: 2px; }
-  .shelf-zone { width: 82px; }
-  .counter-book { width: 42px; }
+  .shelf-zone { width: 72px; }
+  .counter-book { width: 34px; }
   #open-wholesale { padding-inline: 5px; }
   .service-bell { min-width: 58px; padding-inline: 3px; }
   .service-bell small { display: none; }
@@ -1611,6 +1638,70 @@ main { grid-template-columns: minmax(0, 1fr); }
   inset: 0;
   z-index: -1;
   pointer-events: none;
+}
+#street-weather {
+  position: absolute;
+  inset: 14% 8% 22%;
+  overflow: hidden;
+  pointer-events: none;
+}
+#street-weather::before, #street-weather::after { position: absolute; inset: 0; }
+.rain-track {
+  position: absolute;
+  top: 0;
+  left: var(--x);
+  height: var(--ground);
+  width: 1px;
+}
+.rain-track::before, .rain-track::after {
+  content: "";
+  position: absolute;
+  opacity: 0;
+  animation-duration: var(--cycle);
+  animation-delay: var(--delay);
+  animation-iteration-count: infinite;
+  animation-timing-function: linear;
+}
+.rain-track::before {
+  width: calc(1px + var(--depth) * .8px);
+  height: calc(10px + var(--depth) * 18px);
+  background: linear-gradient(transparent, #c1d9e674 72%, #e2f3f8e0);
+  border-radius: 50%;
+  transform-origin: bottom;
+  animation-name: street-rain-fall;
+}
+.rain-track::after {
+  top: 100%;
+  left: var(--drift);
+  width: calc(7px + var(--depth) * 8px);
+  height: calc(2px + var(--depth) * 3px);
+  border: 1px solid #c3dce2aa;
+  border-radius: 50%;
+  animation-name: street-rain-ripple;
+}
+#street-weather[data-weather="snow"]::before, #street-weather[data-weather="snow"]::after {
+  content: "";
+  background-image: radial-gradient(circle at 17% 30%, #fff 1px, transparent 2px),
+    radial-gradient(circle at 71% 75%, #edf7ffcd 1.5px, transparent 2.5px);
+  background-size: 43px 71px, 61px 97px;
+  animation: street-snow 12s linear infinite;
+}
+#street-weather[data-weather="snow"]::after { opacity: .5; animation-delay: -6s; }
+@keyframes street-rain-fall {
+  0% { top: -24px; transform: translate(0, -100%) rotate(-4deg); opacity: 0; }
+  16% { opacity: calc(.54 + var(--depth) * .3); }
+  55% { top: 100%; transform: translate(var(--drift), -100%) rotate(-4deg); opacity: calc(.54 + var(--depth) * .3); }
+  56%, 100% { top: 100%; transform: translate(var(--drift), -100%) rotate(-4deg); opacity: 0; }
+}
+@keyframes street-rain-ripple {
+  0%, 54% { opacity: 0; transform: translate(-50%, -50%) scale(.3); }
+  57% { opacity: .75; transform: translate(-50%, -50%) scale(.45); }
+  76%, 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.6); }
+}
+@keyframes street-snow { to { background-position: 43px 71px, -61px 97px; } }
+@media (prefers-reduced-motion: reduce) {
+  #street-weather::before, #street-weather::after, .rain-track::before, .rain-track::after { animation: none; }
+  .rain-track:nth-child(5n)::after { opacity: .55; }
 }
 .street-background {
   position: absolute;
