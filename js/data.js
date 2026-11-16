@@ -35,13 +35,12 @@ const CONFIG = {
     premiumBudget: [120, 420],
     selfPickChance: .45,
     selfPickCount: [1, 3],
-    specificChance: .35,
-    categoryChance: .45,
+    preferenceExtraChance: .42,
+    preferenceTagMax: 3,
     recommendationChance: .65,
     freshSaleFavor: 1,
     freshSaleRepProgress: 1,
     priceTolerance: { standard: 1.2, fresh: 1.5, mint: 1.65, bloom: 1.5 },
-    conditionChance: .35,
     conditionCheckChance: .40,
     conditionPenalty: 2,
     clearanceMultiplier: .75,
@@ -123,12 +122,12 @@ const SHOP_CALENDAR = {
 
 /* 买家画像：预算倍率、主动讨价概率、最多报价回合、期望折扣区间。 */
 const BUYER_PROFILES = {
-  child:    { name: '小学生', budgetMult: .68, haggleChance: .08, rounds: [1, 1], target: [.94, .98] },
-  student:  { name: '学生', budgetMult: .82, haggleChance: .18, rounds: [1, 2], target: [.90, .97] },
-  youngMan: { name: '青年男生', budgetMult: 1.05, haggleChance: .48, rounds: [2, 2], target: [.88, .95] },
-  auntie:   { name: '街坊阿姨', budgetMult: 1.00, haggleChance: .86, rounds: [4, 5], target: [.78, .88] },
-  adult:    { name: '普通顾客', budgetMult: 1.00, haggleChance: .34, rounds: [2, 3], target: [.87, .95] },
-  elder:    { name: '老街坊', budgetMult: .95, haggleChance: .52, rounds: [3, 4], target: [.83, .92] },
+  child:    { name: '小学生', budgetMult: .68, haggleChance: .08, rounds: [1, 1], target: [.94, .98], categories: ['food', 'fun', 'study'] },
+  student:  { name: '学生', budgetMult: .82, haggleChance: .18, rounds: [1, 2], target: [.90, .97], categories: ['food', 'study', 'fun'] },
+  youngMan: { name: '青年男生', budgetMult: 1.05, haggleChance: .48, rounds: [2, 2], target: [.88, .95], categories: ['food', 'fun', 'daily', 'collect'] },
+  auntie:   { name: '街坊阿姨', budgetMult: 1.00, haggleChance: .86, rounds: [4, 5], target: [.78, .88], categories: ['daily', 'food', 'study'] },
+  adult:    { name: '普通顾客', budgetMult: 1.00, haggleChance: .34, rounds: [2, 3], target: [.87, .95], categories: ['daily', 'food', 'study', 'collect'] },
+  elder:    { name: '老街坊', budgetMult: .95, haggleChance: .52, rounds: [3, 4], target: [.83, .92], categories: ['daily', 'collect', 'food'] },
 };
 
 /* ---------------- 熟客（全原创） ----------------
@@ -181,12 +180,17 @@ const SELLER_PITCH = [
 
 /* ---------------- 戳戳乐 ---------------- */
 const POKE = {
-  boardCost: 48,        // 每板进货价
-  holes: 24,            // 每板洞数
-  price: 5,             // 顾客每戳一洞付费
-  smallPrizeCost: 1,    // 每洞小奖成本
-  basePokes: 4,         // 每日基础戳洞人数
+  boardCost: 24,        // 每板纸格与包装成本
+  holes: 24,            // 每板格子数
+  price: 8,             // 顾客每揭一格付费；按最贵组合计算仍保证整板盈利
+  basePokes: 4,         // 每日基础揭格人数
   grandTraffic: 3,      // 大奖在架时每日额外人数
+  smallPrizes: [
+    { id: 'candy', itemId: 'wh-candy', name: '水果糖', cost: 1 },
+    { id: 'sticker', itemId: 'wh-stickers', name: '迷你贴纸', cost: 1 },
+    { id: 'eraser', itemId: 'wh-eraser', name: '橡皮', cost: 2 },
+  ],
+  defaultMix: { candy: 9, sticker: 8, eraser: 6 },
   // 可选大奖：cost 为放进板里的成本
   grands: [
     { itemId: 'siduche', cost: 80 },
@@ -208,6 +212,54 @@ const STICKER = {
   complaintFine: 30,        // 投诉罚款
   complaintRep: -1,         // 投诉扣口碑
   grumbleAfterComplaint: 40,// 投诉后嘀咕值回落
+};
+
+/* 顾客意见板：留言同时承担玩法提示；回复只给少量口碑进度，不直接改经营数值。 */
+const FEEDBACK = {
+  maxEntries: 40,
+  saleChance: .35,
+  varietyMinKinds: 4,
+  replyRepProgress: 1,
+  topics: {
+    price: { name: '商品价格', tip: '报价超过预算或明显高于货架价时，顾客会拒绝；让利、抹零和合理标价更容易成交。' },
+    variety: { name: '货物种类', tip: '货架上经营大类越齐全，越容易接住不同偏好的顾客，也更方便推荐加购。' },
+    quality: { name: '商品品质', tip: '过期、赝品、改签或未熟热食可能引发投诉；售前检查能避免口碑损失。' },
+    sticker: { name: '集贴纸', tip: '金龙投放为 0 时嘀咕值上涨最快；投放越多，集齐兑付的概率越高。' },
+    poke: { name: '戳戳乐', tip: '大奖仍在板上时更吸引顾客；剩余格子越少还没出大奖，顾客越会怀疑中奖率。' },
+  },
+  messages: {
+    priceHigh: ['标价有点高，想买也得多考虑一下。', '预算就这么多，价格再实在点就好了。'],
+    priceGood: ['价格挺实在，下次放学还来。', '老板肯让一点，买起来很痛快。'],
+    varietyLow: ['想买的类别没多少选择，希望再多进几种货。', '货架有点空，挑来挑去还是那几样。'],
+    varietyGood: ['种类挺全，顺手还能多带一件。', '吃的、用的都能找到，省得再跑别家。'],
+    qualityBad: ['买到的东西品质不对，下次可得先检查。', '标签和实际货品不一样，这种情况不能再有。'],
+    stickerBad: ['集了这么久还没见过金龙，活动到底能不能集齐？', '稀有贴纸一点消息都没有，孩子们都快不信了。'],
+    stickerGood: ['真的有人集齐了，原来金龙贴纸不是传说。', '活动说到做到，孩子们又有兴趣了。'],
+    pokeBad: ['揭了好几格都是小奖，大奖真的还在吗？', '剩下的格子越来越少，希望中奖率别太离谱。'],
+    pokeGood: ['真开出大奖了，围观的人都看见了。', '戳中大东西的感觉太爽了，下次还想玩。'],
+  },
+  replies: {
+    price: [
+      { id: 'check', label: '回复：会检查标价', text: '店主回复：会对照进价和顾客预算重新检查标价。' },
+      { id: 'value', label: '回复：说明货品价值', text: '店主回复：会把品质和货源说明白，再让顾客决定。' },
+    ],
+    variety: [
+      { id: 'restock', label: '回复：会补齐品类', text: '店主回复：会查看缺少的经营大类，下一批进货时补上。' },
+      { id: 'request', label: '回复：欢迎点货', text: '店主回复：可以留下想买的类别，进货时会优先考虑。' },
+    ],
+    quality: [
+      { id: 'inspect', label: '回复：加强检查', text: '店主回复：以后上架和交货前都会再检查品质与标签。' },
+      { id: 'apology', label: '回复：道歉并改进', text: '店主回复：这次确实没把好关，已经记下并会改进。' },
+    ],
+    sticker: [
+      { id: 'odds', label: '回复：调整投放', text: '店主回复：会检查金龙投放量，避免活动长期无法集齐。' },
+      { id: 'honest', label: '回复：公开说明规则', text: '店主回复：会把稀有贴纸投放情况说明得更清楚。' },
+    ],
+    poke: [
+      { id: 'board', label: '回复：公开奖池', text: '店主回复：大奖是否还在板上会如实展示。' },
+      { id: 'refresh', label: '回复：及时换新板', text: '店主回复：格子揭完后会及时换板，让每局奖池完整。' },
+    ],
+  },
 };
 
 /* ---------------- 物品库（29 件） ----------------
@@ -482,7 +534,15 @@ const EXTRA_GOODS = [
   { id: 'wh-stamp', footprint: { w: 1, h: 1 }, name: '小印章', emoji: '🌼', cat: '文具', cost: 2, value: 4, pack: 5 },
 ];
 const SHOP_SIGN = { defaultName: '校门口小卖部', maxLength: 16 };
-const DELIVERY = { packTurns: 2, pickupTurns: 1, fee: 5, repProgress: 3, count: 2 };
+const DELIVERY = {
+  packTurns: 2,
+  pickupTurns: 1,
+  fee: 5,
+  repProgress: 3,
+  count: 2,
+  dailyCaps: [1, 2, 3],
+  upgradeCosts: [120, 260],
+};
 const NEW_REGULAR_ROLES = {
   foodblogger: '美食博主', shopblogger: '探店博主', university: '大学生', infirmary: '医务室老师',
   grandma: '老街坊',
@@ -509,7 +569,7 @@ const EXTRA_GOOD_PREFERENCES = {
   cosgirl: ['wh-doll', 'wh-stamp', 'wh-stickers'],
   teacher: ['wh-stamp'],
 };
-const SHELF_GRID = { columns: 12, rows: 6, stackMaxCells: 2 };
+const SHELF_GRID = { columns: 12, rows: 6, layoutVersion: 2 };
 const NEW_CUSTOMERS = [
   { id: 'foodblogger', name: '阿葵', profile: 'adult', likes: ['wh-shrimp', 'wh-latiao', 'grill-sausage', 'grill-ball'] },
   { id: 'shopblogger', name: '陶野', profile: 'adult', likes: ['wh-pear', 'wh-robot', 'wh-duel', 'wh-choco'] },
@@ -652,19 +712,19 @@ const SERVICE_NAMES = {
   ledger: '熟客赊账', sticker: '集贴纸', premium: '高价货交易', grill: '烤肠机',
 };
 const TUTORIALS = [
-  { id: 'delivery', unlock: 'delivery', title: '接外卖订单', text: '点右上角「外卖」接单。两个顾客回合内配好货，随后等骑手来取，交单后获得货款、服务费与口碑进度。' },
+  { id: 'delivery', unlock: 'delivery', title: '接外卖订单', text: '顾客回合推进后会收到新订单。接单后手动把两件指定商品放入骑手背包，骑手随后到店取走；临近闭店不能再接单。外卖台可以花钱把每日上限从 1 单升到最多 3 单。' },
   { id: 'customers', unlock: 'organizer', title: '顾客图鉴', tab: 'customers', action: '看图鉴', text: '在顾客图鉴里查看来店次数和已听过的故事。部分顾客在第 1、3、5 次来店时会讲到后续。' },
   { id: 'new-goods', unlock: 'clearance', title: '供货商新一批货', tab: 'wholesale', action: '看新货', text: '辣条、汽水、文具和玩具等新货已上架。不同顾客会优先挑自己喜欢的商品。' },
-  { id: 'opening', title: '第一次开店', tab: 'wholesale', action: '去备货', text: '先向供货商订一批干脆面或汽水，再点「开店」。顾客会自动走到柜台并开口，按要求拿货、确认小票。接待完就可以收摊。' },
+  { id: 'opening', title: '第一次开店', tab: 'wholesale', action: '去备货', text: '先向供货商订一批干脆面或汽水，再点桌上的服务铃开门。营业后由你按铃叫下一位顾客；不按铃时可以继续补货和整理。' },
   { id: 'organizer', unlock: 'organizer', title: '请小梁帮忙宣传', text: '点右上角「社区小梁」，付费后当天多来两位买家。每天可宣传一次。' },
   { id: 'marbles', unlock: 'clearance', title: '供货商上新 · 玻璃弹珠', tab: 'wholesale', action: '看新货', text: '供货商现在能订玻璃弹珠。点商品下方的进货按钮订一批，之后可在柜台卖出。' },
   { id: 'clearance', unlock: 'clearance', title: '处理临期食品', text: '有临期库存时，接待页面会出现促销区。点商品加到小票，默认是货架标价的七五折。顾客点名时仍要按要求拿货。' },
-  { id: 'poke', unlock: 'poke', title: '挂上戳戳乐', tab: 'poke', action: '看洞洞板', text: '点柜台右侧的戳戳乐，选一个大奖并挂上新板。熟客有时会在结账后问能否戳一个洞。答应后由顾客选洞，收入在收摊时入账。' },
+  { id: 'poke', unlock: 'poke', title: '挂上戳戳乐', tab: 'poke', action: '看戳戳板', text: '点柜台右侧的戳戳乐，自定义糖果、贴纸和橡皮的格子数量，再选大奖挂上新板。熟客有时会在结账后提出揭一格，收入在收摊时入账。' },
   { id: 'harmonica', unlock: 'receiving', title: '供货商上新 · 口琴', tab: 'wholesale', action: '看新货', text: '供货商现在能按批订口琴。进货前可比较今日进价与参考售价。' },
   { id: 'receiving', unlock: 'receiving', title: '收旧货前先验货', text: '从下次开店起会遇到卖家。点击物品上的标记查线索，每件最多查三处。验完按自己的判断报价，起价被拒后还有一次机会。' },
   { id: 'ledger', unlock: 'ledger', title: '给熟客记赊账', tab: 'ledger', action: '看赊账本', text: '提出赊账的熟客会在小票上出现「记赊账」。同意后可到赊账本看欠款和到期日，到期结果在收摊时结算。' },
   { id: 'sticker', unlock: 'sticker', title: '开集贴纸活动', tab: 'sticker', action: '看活动', text: '在集贴纸页打开活动，再选择投放几张金龙贴纸。投得越多，顾客越可能集齐，兑付和投诉在收摊时结算。' },
-  { id: 'premium', unlock: 'premium', title: '开始交易高价货', text: '开店后可能遇到带贵重物件的卖家。收购前记得验货，并留够现金交租。洞洞板也多了高价大奖可选。' },
+  { id: 'premium', unlock: 'premium', title: '开始交易高价货', text: '开店后可能遇到带贵重物件的卖家。收购前记得验货，并留够现金交租。戳戳板也多了高价大奖可选。' },
   { id: 'grill', unlock: 'grill', title: '用烤肠机做热食', tab: 'wholesale', action: '看烤肠机', text: '先从供货商买烤肠机，再订烤肠或丸子串。放上烤位后，每送走一位顾客推进一次火候。熟了或开花时可加到小票，未解冻和烤糊的不能卖。' },
 ];
 // target 是要点击的操作，via 用于入口尚未展开时。
@@ -673,7 +733,7 @@ const TUTORIAL_ARROWS = {
   organizer: { target: '#shop-organizer', hint: '点小梁了解宣传' },
   marbles: { target: '[data-order="danzhu"]:enabled', via: '#open-wholesale', hint: '看看新到的玻璃弹珠' },
   clearance: { target: '[data-guide="clearance"] button', hint: '看看临期促销商品' },
-  poke: { target: '#open-poke', hint: '打开洞洞板' },
+  poke: { target: '#open-poke', hint: '打开戳戳板' },
   harmonica: { target: '[data-order="kouqin"]:enabled', via: '#open-wholesale', hint: '看看新到的口琴' },
   receiving: { target: '.inspection-marker:enabled', hint: '点击标记查看验货线索' },
   ledger: { target: '[data-tab="ledger"]', via: '#side > summary', hint: '打开赊账本' },
@@ -691,15 +751,24 @@ const GRILL = {
   trayCapacity: 6,
   extraStudents: 2,
   studentNames: ['背书包的学生', '放学的学生'],
+  art: {
+    columns: 4,
+    rows: 2,
+    items: {
+      'grill-sausage': { row: 0, stages: { frozen: 0, raw: 0, cooked: 1, bloom: 2, burnt: 3 } },
+      'grill-ball': { row: 1, stages: { frozen: 0, raw: 0, cooked: 1, bloom: 1, burnt: 2 } },
+    },
+  },
   stages: [
     { key: 'frozen', name: '未解冻', turns: 0, factor: 0 },
-    { key: 'raw', name: '未熟', turns: 1, factor: .6, checkChance: .55 },
+    { key: 'raw', name: '未熟', turns: 1, factor: .6, checkChance: 1, reputationPenalty: 1 },
     { key: 'cooked', name: '熟了', turns: 2, factor: 1 },
     { key: 'bloom', name: '开花', turns: 3, factor: 1.25 },
     { key: 'burnt', name: '烤糊', turns: 5, factor: 0 },
   ],
   foods: [
-    { id: 'grill-sausage', footprint: { w: 1, h: 1 }, name: '烤肠', emoji: '🌭', cat: '热食', cost: 2, pack: 8, value: 6 },
-    { id: 'grill-ball', footprint: { w: 1, h: 1 }, name: '丸子串', emoji: '🍡', cat: '热食', cost: 3, pack: 6, value: 8 },
+    { id: 'grill-sausage', footprint: { w: 1, h: 1 }, name: '烤肠', cat: '热食', cost: 2, pack: 8, value: 6 },
+    { id: 'grill-ball', footprint: { w: 1, h: 1 }, name: '丸子串', cat: '热食', cost: 3, pack: 6, value: 8,
+      stageMap: { bloom: 'cooked' } },
   ],
 };
