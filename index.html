@@ -50,11 +50,9 @@
       <button id="open-calendar" class="btn small" type="button" aria-haspopup="dialog">日历</button>
       <span class="stat money" id="stat-money">💰 ¥250</span>
       <span class="stat" id="stat-rep">😊 口碑 0</span>
-      <span class="stat goal" id="stat-goal">🎯 盘下店面 ¥250 / ¥3000</span>
+      <div class="stat goal"><span id="stat-goal">盘下店面</span><progress id="shop-goal-progress" aria-label="盘店进度"></progress></div>
     </div>
     <div class="top-actions">
-      <button id="btn-openday" class="btn gold">开店</button>
-      <button id="btn-endday" class="btn primary hidden">🌙 收摊结算</button>
       <button id="music-toggle" class="btn" aria-label="背景音乐" aria-pressed="false">音乐</button><label class="volume-control">音量 <input id="music-volume" type="range" min="0" max="100" value="70"></label><button id="open-dev" class="btn dev-only hidden">开发测试</button><button id="open-title" class="btn">主菜单</button>
     </div>
   </header>
@@ -73,6 +71,7 @@
   <main>
     <section class="shop" aria-label="小卖部售货窗口">
       <div class="street" data-light="morning">
+        <div id="street-weather" aria-hidden="true"></div>
         <div class="street-backgrounds" aria-hidden="true">
           <img class="street-background morning" src="assets/school-window-morning.png" alt="">
           <img class="street-background noon" src="assets/school-window-noon.png" alt="">
@@ -131,11 +130,14 @@
             <button id="open-wholesale" type="button" class="btn small gold">进货</button>
             <button id="open-shelf-grid" type="button" class="btn small">上架</button>
           </div>
+          <div class="counter-service-actions">
           <button id="service-bell" type="button" class="service-bell" aria-live="polite">
             <span class="service-bell-dome" aria-hidden="true"></span>
-            <strong id="service-bell-label">开门营业</strong>
+            <strong id="service-bell-label">按铃接待下一位</strong>
             <small id="service-bell-hint">也可以先备货</small>
           </button>
+          <button id="btn-endday" type="button" class="service-bell close-shop" aria-haspopup="dialog"><span aria-hidden="true">☾</span><strong>收摊结算</strong></button>
+          </div>
         </section>
       </div>
       <section id="counter" class="trade-stage hidden" aria-label="柜台交易">
@@ -170,6 +172,14 @@
       <label for="shop-name">招牌名称</label>
       <input id="shop-name" type="text" required>
       <button class="btn gold">挂上招牌</button>
+    </form>
+  </dialog>
+  <dialog id="close-shop-dialog" class="shop-service-dialog" aria-labelledby="close-shop-title" aria-describedby="close-shop-message">
+    <h2 id="close-shop-title">收摊结算</h2>
+    <p id="close-shop-message"></p>
+    <form method="dialog" class="close-shop-actions">
+      <button class="btn small" autofocus>继续营业</button>
+      <button id="confirm-endday" class="btn small gold" type="button">确认收摊</button>
     </form>
   </dialog>
   <dialog id="calendar-dialog" class="shop-service-dialog" aria-labelledby="calendar-title">

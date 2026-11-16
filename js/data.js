@@ -29,6 +29,8 @@ const CONFIG = {
   ],
   reputation: { min: -100, max: 100, visitsPerPoint: 12, dailyLossLimit: 3, failedBidLoss: 1 },
   retail: {
+    stockedDemandDays: 5,
+    diverseDemandCategories: 3,
     buyerCount: [1, 8],
     everydayBudget: [12, 25],
     specialtyBudget: [30, 115],
@@ -109,12 +111,14 @@ const SHOP_CATEGORIES = [
 // 以开店第一天为周一，每 28 天重复一次。事件按周期内的日期安排。
 const SHOP_CALENDAR = {
   cycleDays: 28,
+  rainDrops: 68,
   weekdays: ['一', '二', '三', '四', '五', '六', '日'],
   events: [
-    { day: 3, name: '雨天', description: '放学后大家赶着回家，零食饮料也好商量。', buyers: -1, prices: { food: .90 } },
+    { day: 3, name: '雨天', weather: 'rain', description: '放学后大家赶着回家，零食饮料也好商量。', buyers: -1, prices: { food: .90 } },
     { day: 5, name: '运动会', description: '操场活动结束，孩子们来补充零食和饮料。', buyers: 2, prices: { food: 1.20 } },
     { day: 9, name: '手工课', description: '手工课要用到文具，校门口比平常热闹。', buyers: 1, prices: { study: 1.15 } },
     { day: 14, name: '学校放假', description: '学生少了，文具和玩具更容易议价。', buyers: -2, prices: { study: .85, fun: .90 } },
+    { day: 17, name: '雪天', weather: 'snow', description: '雪天街上行人少了，热食和零食更受欢迎。', buyers: -1, prices: { food: 1.10 } },
     { day: 19, name: '街坊市集', description: '周边摊位陆续开张，日用品和旧物更受关注。', buyers: 2, prices: { daily: 1.15, collect: 1.10 } },
     { day: 24, name: '放学联欢', description: '同学们结伴来买零食和小玩具。', buyers: 2, prices: { food: 1.10, fun: 1.15 } },
   ],
@@ -220,6 +224,27 @@ const FEEDBACK = {
   saleChance: .35,
   varietyMinKinds: 4,
   replyRepProgress: 1,
+  replyWindowDays: 1,
+  followUpChance: .65,
+  secondFollowUpChance: .18,
+  profiles: [
+    { name: '橘猫趴窗台', icon: '🐱', color: '#f2d6a9' },
+    { name: '校门口的小熊', icon: '🐻', color: '#e8cfbc' },
+    { name: '晚到的兔同学', icon: '🐰', color: '#ead4e6' },
+    { name: '戴帽子的店员', icon: '🤠', color: '#f0dfb6' },
+    { name: '课间巡逻鸽', icon: '🐦', color: '#d4e1ed' },
+    { name: '夜班太空人', icon: '🧑‍🚀', color: '#dbdbef' },
+    { name: '文具盒机器人', icon: '🤖', color: '#d1e7dd' },
+    { name: '袋子里的小狗', icon: '🐶', color: '#e8d4bb' },
+  ],
+  followUps: {
+    price: { good: ['实惠的话，下回我也顺路去看看。', '放学零花钱不多，这个消息来得正好。'], concern: ['我也想看看有没有便宜一点的选择。', '货架价和最后付的价能写清楚就好了。'] },
+    variety: { good: ['买吃的时能顺便补文具，省了一趟路。', '下次我也想去看看文具架。'], concern: ['我倒是想多看看玩具，不知道啥时候上新。', '能在留言里点货就方便了，我想买支笔。'] },
+    quality: { concern: ['我下次也会先看看标签再买。', '希望同一款不同成色能分开放，好挑一点。'] },
+    sticker: { good: ['终于看到有人集齐了！', '我还差一张，下次再来碰碰运气。'], concern: ['我家那套也就差金龙。', '要是能看到投放情况，心里就有数了。'] },
+    poke: { good: ['我还没见过开大奖呢，想看看。', '下回路过也想围观一会儿。'], concern: ['也想知道大奖还在不在板上。', '希望打开奖池之前就能看看奖品。'] },
+  },
+  thankYou: { id: 'thanks', label: '感谢留言', text: '谢谢你来留言，下次路过欢迎再来坐坐。' },
   topics: {
     price: { name: '商品价格', tip: '报价超过预算或明显高于货架价时，顾客会拒绝；让利、抹零和合理标价更容易成交。' },
     variety: { name: '货物种类', tip: '货架上经营大类越齐全，越容易接住不同偏好的顾客，也更方便推荐加购。' },
@@ -607,14 +632,26 @@ const REGULAR_STORIES = {
   sundaye: ['我想找回一本小时候读过的连环画。', '找着一本同系列的，封底还有原主人写的名字。', '我孙女也爱看，我打算把这几本留给她。'],
 };
 
+// 供货商常规商品按营业日分批上新。首日的三种基础货不在批次内。
+const WHOLESALE_RELEASES = [
+  { day: 4, items: ['danzhu', 'wh-latiao', 'wh-eraser', 'wh-shrimp'] },
+  { day: 6, items: ['wh-pear', 'wh-pencil', 'wh-beanbag', 'wh-stickers'] },
+  { day: 8, items: ['kouqin', 'wh-candy', 'wh-plasticbook', 'wh-shuttle'] },
+  { day: 10, items: ['wh-choco', 'wh-case', 'wh-clip', 'wh-stamp'] },
+  { day: 12, items: ['wh-ink', 'wh-watercolor', 'wh-battery', 'wh-duel'] },
+  { day: 14, items: ['wh-compass', 'wh-cologne', 'wh-balm'] },
+  { day: 17, items: ['wh-laser', 'wh-robot', 'wh-doll'] },
+];
+const WHOLESALE_RELEASE_DAYS = Object.fromEntries(WHOLESALE_RELEASES.flatMap(({ day, items }) =>
+  items.map(id => [id, day])));
 const WHOLESALE = [
   { id: 'wh-noodles', footprint: { w: 1, h: 1 }, name: '干脆面', emoji: '🍜', cost: 2, value: 4, pack: 6 },
   { id: 'wh-soda', footprint: { w: 1, h: 2 }, name: '橘子汽水', emoji: '🥤', cost: 3, value: 5, pack: 6 },
   { id: 'wh-notebook', footprint: { w: 1, h: 1 }, name: '田字格本', emoji: '📒', cost: 4, value: 7, pack: 4 },
-  { id: 'danzhu', footprint: { w: 1, h: 1 }, name: '玻璃弹珠', cost: 3, value: 6, pack: 4, unlock: 'clearance' },
-  { id: 'kouqin', footprint: { w: 1, h: 2 }, name: '口琴', cost: 11, value: 19, pack: 2, unlock: 'receiving' },
-  ...NEW_GOODS.map(item => ({ ...item, unlock: 'clearance' })),
-  ...EXTRA_GOODS.map(item => ({ ...item, unlock: 'clearance' })),
+  { id: 'danzhu', footprint: { w: 1, h: 1 }, name: '玻璃弹珠', cost: 3, value: 6, pack: 4 },
+  { id: 'kouqin', footprint: { w: 1, h: 2 }, name: '口琴', cost: 11, value: 19, pack: 2 },
+  ...NEW_GOODS,
+  ...EXTRA_GOODS,
 ];
 
 // 按天轮换进价与缺货。同一天刷新或回档时供货条件一致。
@@ -714,13 +751,15 @@ const SERVICE_NAMES = {
 const TUTORIALS = [
   { id: 'delivery', unlock: 'delivery', title: '接外卖订单', text: '顾客回合推进后会收到新订单。接单后手动把两件指定商品放入骑手背包，骑手随后到店取走；临近闭店不能再接单。外卖台可以花钱把每日上限从 1 单升到最多 3 单。' },
   { id: 'customers', unlock: 'organizer', title: '顾客图鉴', tab: 'customers', action: '看图鉴', text: '在顾客图鉴里查看来店次数和已听过的故事。部分顾客在第 1、3、5 次来店时会讲到后续。' },
-  { id: 'new-goods', unlock: 'clearance', title: '供货商新一批货', tab: 'wholesale', action: '看新货', text: '辣条、汽水、文具和玩具等新货已上架。不同顾客会优先挑自己喜欢的商品。' },
-  { id: 'opening', title: '第一次开店', tab: 'wholesale', action: '去备货', text: '先向供货商订一批干脆面或汽水，再点桌上的服务铃开门。营业后由你按铃叫下一位顾客；不按铃时可以继续补货和整理。' },
+  ...WHOLESALE_RELEASES.map(({ day, items }) => ({
+    id: 'wholesale-day-' + day, day, title: '供货商上新 · 第 ' + day + ' 天', tab: 'wholesale', action: '看新货',
+    text: '上新商品：' + items.map(id => WHOLESALE.find(product => product.id === id).name).join('、') +
+      '。向供货商订货后，记得拖上货架。',
+  })),
+  { id: 'opening', title: '第一次营业', tab: 'wholesale', action: '去备货', text: '每天自动开始营业。先向供货商订货并拖上货架，再按铃叫下一位顾客。柜台旁可以随时收摊。' },
   { id: 'organizer', unlock: 'organizer', title: '请小梁帮忙宣传', text: '点右上角「社区小梁」，付费后当天多来两位买家。每天可宣传一次。' },
-  { id: 'marbles', unlock: 'clearance', title: '供货商上新 · 玻璃弹珠', tab: 'wholesale', action: '看新货', text: '供货商现在能订玻璃弹珠。点商品下方的进货按钮订一批，之后可在柜台卖出。' },
   { id: 'clearance', unlock: 'clearance', title: '处理临期食品', text: '有临期库存时，接待页面会出现促销区。点商品加到小票，默认是货架标价的七五折。顾客点名时仍要按要求拿货。' },
   { id: 'poke', unlock: 'poke', title: '挂上戳戳乐', tab: 'poke', action: '看戳戳板', text: '点柜台右侧的戳戳乐，自定义糖果、贴纸和橡皮的格子数量，再选大奖挂上新板。熟客有时会在结账后提出揭一格，收入在收摊时入账。' },
-  { id: 'harmonica', unlock: 'receiving', title: '供货商上新 · 口琴', tab: 'wholesale', action: '看新货', text: '供货商现在能按批订口琴。进货前可比较今日进价与参考售价。' },
   { id: 'receiving', unlock: 'receiving', title: '收旧货前先验货', text: '从下次开店起会遇到卖家。点击物品上的标记查线索，每件最多查三处。验完按自己的判断报价，起价被拒后还有一次机会。' },
   { id: 'ledger', unlock: 'ledger', title: '给熟客记赊账', tab: 'ledger', action: '看赊账本', text: '提出赊账的熟客会在小票上出现「记赊账」。同意后可到赊账本看欠款和到期日，到期结果在收摊时结算。' },
   { id: 'sticker', unlock: 'sticker', title: '开集贴纸活动', tab: 'sticker', action: '看活动', text: '在集贴纸页打开活动，再选择投放几张金龙贴纸。投得越多，顾客越可能集齐，兑付和投诉在收摊时结算。' },
@@ -729,12 +768,14 @@ const TUTORIALS = [
 ];
 // target 是要点击的操作，via 用于入口尚未展开时。
 const TUTORIAL_ARROWS = {
+  ...Object.fromEntries(WHOLESALE_RELEASES.map(({ day, items }) => ['wholesale-day-' + day, {
+    target: items.map(id => `[data-order="${id}"]:enabled`).join(', '),
+    via: '#open-wholesale', hint: '看看今天的新货',
+  }])),
   delivery: { target: '#open-delivery', hint: '查看外卖订单' },
   organizer: { target: '#shop-organizer', hint: '点小梁了解宣传' },
-  marbles: { target: '[data-order="danzhu"]:enabled', via: '#open-wholesale', hint: '看看新到的玻璃弹珠' },
   clearance: { target: '[data-guide="clearance"] button', hint: '看看临期促销商品' },
   poke: { target: '#open-poke', hint: '打开戳戳板' },
-  harmonica: { target: '[data-order="kouqin"]:enabled', via: '#open-wholesale', hint: '看看新到的口琴' },
   receiving: { target: '.inspection-marker:enabled', hint: '点击标记查看验货线索' },
   ledger: { target: '[data-tab="ledger"]', via: '#side > summary', hint: '打开赊账本' },
   sticker: { target: '[data-tab="sticker"]', via: '#side > summary', hint: '打开集贴纸活动' },
